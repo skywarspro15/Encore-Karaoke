@@ -11,7 +11,10 @@ module.exports = {
     extraResource: ["resources/static"],
     linux: {
       target: 'deb',
-    }
+    },
+    "packagerConfig": {
+      "executableName": "encore-karaoke"
+    },
   },
   hooks: {
     packageAfterCopy: async (_, appResources) => {
