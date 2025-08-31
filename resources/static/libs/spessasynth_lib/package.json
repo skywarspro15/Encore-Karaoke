@@ -1,0 +1,61 @@
+{
+  "name": "spessasynth_lib",
+  "version": "3.27.8",
+  "description": "MIDI and SoundFont2/DLS library for the browsers with no compromises",
+  "browser": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "node build_scripts/build.js",
+    "debug": "node build_scripts/debug_enable.js",
+    "release": "node build_scripts/debug_disable.js",
+    "build:pages": "node build_scripts/build_pages.js",
+    "build:examples": "node examples/build_examples.js",
+    "build:docs": "node build_scripts/build_docs.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spessasus/spessasynth_lib.git"
+  },
+  "main": "index.js",
+  "keywords": [
+    "soundfont",
+    "synthesizer",
+    "synth",
+    "sf2",
+    "sf3",
+    "dls",
+    "dls-to-sf2",
+    "midi",
+    "rmi",
+    "midi-player",
+    "web-audio-api",
+    "web-midi-api",
+    "player",
+    "soundfont2",
+    "soundfont3",
+    "audio-buffer-to-wav"
+  ],
+  "files": [
+    "src",
+    "synthetizer/worklet_processor.min.js",
+    "index.js"
+  ],
+  "author": {
+    "name": "spessasus",
+    "email": "spesekspesek@gmail.com",
+    "url": "https://github.com/spessasus"
+  },
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/spessasus/spessasynth_lib/issues",
+    "email": "spesekspesek@gmail.com"
+  },
+  "homepage": "https://github.com/spessasus/spessasynth_lib#readme",
+  "devDependencies": {
+    "esbuild": "^0.25.2"
+  },
+  "dependencies": {
+    "spessasynth_core": "latest"
+  }
+}

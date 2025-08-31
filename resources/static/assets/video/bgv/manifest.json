@@ -1,0 +1,21 @@
+[
+  {
+    "BGV_CATEGORY": "Philippines",
+    "BGV_LIST": [
+      "philippines/1.mp4",
+      "philippines/2.mp4",
+      "philippines/3.mp4",
+      "philippines/4.mp4",
+      "philippines/5.mp4",
+      "philippines/6.mp4",
+      "philippines/7.mp4",
+      "philippines/8.mp4",
+      "philippines/9.mp4",
+      "philippines/10.mp4"
+    ]
+  },
+  {
+    "BGV_CATEGORY": "3D",
+    "BGV_LIST": ["3d/1.mp4"]
+  }
+]
