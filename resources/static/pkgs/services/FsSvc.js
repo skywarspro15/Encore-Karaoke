@@ -215,9 +215,26 @@ const pkg = {
 
       for (const file of processableFiles) {
         const filename = file.name;
-        const extension = filename.split(".").pop().toLowerCase();
-        const basename = filename.substring(0, filename.lastIndexOf("."));
         const fullPath = `${libraryPath}${filename}`;
+
+        // --- START: MODIFIED LOGIC FOR MULTIPLEX SUPPORT ---
+        const isMultiplexed = filename.toLowerCase().includes(".multiplexed.");
+        let basename, extension;
+
+        // Correctly get the final extension regardless of multiplexing
+        extension = filename.split(".").pop().toLowerCase();
+
+        if (isMultiplexed) {
+          // Remove the final extension AND the ".multiplexed" part to get the base name
+          const regex = new RegExp(`\\.multiplexed\\.${extension}$`, "i");
+          basename = filename.replace(regex, "");
+        } else {
+          // Just remove the final extension
+          const lastDotIndex = filename.lastIndexOf(".");
+          basename =
+            lastDotIndex > -1 ? filename.substring(0, lastDotIndex) : filename;
+        }
+        // --- END: MODIFIED LOGIC FOR MULTIPLEX SUPPORT ---
 
         let songData = null;
         let artist = "Unknown Artist";
@@ -228,7 +245,8 @@ const pkg = {
           allFilenames.has(`${basename}.lrc`)
         ) {
           songData = {
-            type: "audio",
+            // --- MODIFIED: Set type based on whether the file is multiplexed ---
+            type: isMultiplexed ? "multiplexed" : "audio",
             lrcPath: `${libraryPath}${basename}.lrc`,
           };
           try {
