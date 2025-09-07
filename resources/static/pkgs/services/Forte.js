@@ -46,7 +46,6 @@ const sfxCache = new Map();
 
 // --- Combined Service State ---
 const state = {
-  // --- START: SCORING ENGINE (Replaces Vocal Engine) ---
   scoring: {
     enabled: false,
     micStream: null,
@@ -54,16 +53,41 @@ const state = {
     micAnalyser: null,
     vocalGuideAnalyser: null,
     pitchDetector: null,
-    score: 0,
-    // --- NEW CUMULATIVE SCORING STATE V3 ---
-    highestScoreThisSong: 0, // Tracks the peak score to prevent visual dips
-    guideVocalDelayNode: null, // For latency compensation
+    guideVocalDelayNode: null,
+
+    // --- NEW: Multi-Criteria Scoring State ---
+    finalScore: 0,
+    details: {
+      pitchAndRhythm: 0, // %
+      vibrato: 0, // %
+      upband: 0, // %
+      downband: 0, // %
+    },
+    // --- NEW: Latency ---
+    measuredLatencyS: 0.05, // A sensible default (50ms) before calibration
+
+    // --- NEW: Internal trackers for the criteria ---
+    // Pitch & Rhythm
     totalScorableNotes: 0,
     notesHit: 0,
+    // Vibrato
+    vibratoOpportunities: 0,
+    vibratoNotesHit: 0,
+    // Transitions (Upband/Downband)
+    upbandOpportunities: 0,
+    upbandsHit: 0,
+    downbandOpportunities: 0,
+    downbandsHit: 0,
+    lastGuidePitch: 0,
+    hasScoredCurrentTransition: false,
+
+    // Real-time state
+    pitchHistory: [],
     isVocalGuideNoteActive: false,
     hasHitCurrentNote: false,
-    guideNoteDebounceStart: 0,
-    // --- END NEW STATE ---
+    isHoldingNote: false,
+    noteHoldStartTime: 0,
+
     micDevices: [],
     currentMicDeviceId: "default",
   },
@@ -116,11 +140,14 @@ let micAnalyserBuffer = null;
 // --- NEW SCORING CONSTANTS ---
 const GUIDE_CLARITY_THRESHOLD = 0.9;
 const MIC_CLARITY_THRESHOLD = 0.85;
-const NOTE_DEBOUNCE_DURATION_MS = 50;
-const LATENCY_COMPENSATION_S = 0.15; // 150ms latency compensation
+const PITCH_HISTORY_LENGTH = 60;
+const VIBRATO_HOLD_DURATION_MS = 400;
+const VIBRATO_STD_DEV_MIN = 0.8;
+const VIBRATO_STD_DEV_MAX = 4.0;
+const TRANSITION_ANALYSIS_WINDOW_MS = 100;
 
 /**
- * Calculates the score based on a debounced, cumulative, latency-compensated algorithm.
+ * Calculates a multi-faceted score based on pitch, rhythm, vibrato, and transitions.
  */
 function updateScore() {
   if (
@@ -131,18 +158,16 @@ function updateScore() {
   ) {
     return;
   }
-
-  const pitchDetector = state.scoring.pitchDetector;
-  const guideAnalyser = state.scoring.vocalGuideAnalyser;
-  const micAnalyser = state.scoring.micAnalyser;
-
-  if (!guideAnalyserBuffer) {
+  // --- 1. DATA ACQUISITION ---
+  const {
+    pitchDetector,
+    vocalGuideAnalyser: guideAnalyser,
+    micAnalyser,
+  } = state.scoring;
+  if (!guideAnalyserBuffer)
     guideAnalyserBuffer = new Float32Array(guideAnalyser.fftSize);
-  }
-  if (!micAnalyserBuffer) {
+  if (!micAnalyserBuffer)
     micAnalyserBuffer = new Float32Array(micAnalyser.fftSize);
-  }
-
   guideAnalyser.getFloatTimeDomainData(guideAnalyserBuffer);
   micAnalyser.getFloatTimeDomainData(micAnalyserBuffer);
 
@@ -155,66 +180,181 @@ function updateScore() {
     audioContext.sampleRate,
   );
 
-  // 1. Guide Note State Machine
-  if (guideClarity > GUIDE_CLARITY_THRESHOLD) {
-    if (state.scoring.guideNoteDebounceStart === 0) {
-      state.scoring.guideNoteDebounceStart = performance.now();
+  state.scoring.pitchHistory.push({
+    pitch: micPitch,
+    clarity: micClarity,
+    time: performance.now(),
+  });
+  if (state.scoring.pitchHistory.length > PITCH_HISTORY_LENGTH)
+    state.scoring.pitchHistory.shift();
+
+  // --- 2. GUIDE NOTE STATE MACHINE & OPPORTUNITY TRACKING ---
+  const wasGuideNoteActive = state.scoring.isVocalGuideNoteActive;
+  const isGuideNoteActive = guideClarity > GUIDE_CLARITY_THRESHOLD;
+  state.scoring.isVocalGuideNoteActive = isGuideNoteActive;
+
+  // Rising edge: A new guide note has just started.
+  if (isGuideNoteActive && !wasGuideNoteActive) {
+    state.scoring.totalScorableNotes++;
+    state.scoring.hasHitCurrentNote = false;
+    state.scoring.hasScoredCurrentTransition = false;
+
+    // Transition opportunity detection
+    if (state.scoring.lastGuidePitch > 0) {
+      if (guidePitch > state.scoring.lastGuidePitch * 1.05) {
+        // More than ~a semitone higher
+        state.scoring.upbandOpportunities++;
+      } else if (guidePitch < state.scoring.lastGuidePitch * 0.95) {
+        // More than ~a semitone lower
+        state.scoring.downbandOpportunities++;
+      }
     }
-    if (
-      !state.scoring.isVocalGuideNoteActive &&
-      performance.now() - state.scoring.guideNoteDebounceStart >
-        NOTE_DEBOUNCE_DURATION_MS
-    ) {
-      state.scoring.isVocalGuideNoteActive = true;
-      state.scoring.hasHitCurrentNote = false;
-      state.scoring.totalScorableNotes++;
-    }
-  } else {
-    state.scoring.guideNoteDebounceStart = 0;
-    state.scoring.isVocalGuideNoteActive = false;
   }
 
-  // 2. User Scoring Logic
-  if (
-    state.scoring.isVocalGuideNoteActive &&
-    !state.scoring.hasHitCurrentNote &&
-    micClarity > MIC_CLARITY_THRESHOLD &&
-    micPitch > 50
-  ) {
-    let normalizedMicPitch = micPitch;
-    while (normalizedMicPitch < guidePitch * 0.75) {
-      normalizedMicPitch *= 2;
+  // Falling edge: A guide note has just ended.
+  if (!isGuideNoteActive && wasGuideNoteActive) {
+    if (state.scoring.isHoldingNote) {
+      // If user was singing when the note ended
+      const holdDuration = performance.now() - state.scoring.noteHoldStartTime;
+      if (holdDuration > VIBRATO_HOLD_DURATION_MS) {
+        state.scoring.vibratoOpportunities++;
+      }
     }
-    while (normalizedMicPitch > guidePitch * 1.5) {
-      normalizedMicPitch /= 2;
-    }
+    state.scoring.isHoldingNote = false;
+    state.scoring.lastGuidePitch = guidePitch; // Store the pitch of the note that just ended
+  }
 
+  // --- 3. USER SCORING & STYLE ANALYSIS ---
+  const isSinging = micClarity > MIC_CLARITY_THRESHOLD && micPitch > 50;
+  let isCorrectPitch = false;
+  if (isGuideNoteActive && isSinging) {
+    let normalizedMicPitch = micPitch;
+    while (normalizedMicPitch < guidePitch * 0.75) normalizedMicPitch *= 2;
+    while (normalizedMicPitch > guidePitch * 1.5) normalizedMicPitch /= 2;
     const centsDifference = 1200 * Math.log2(normalizedMicPitch / guidePitch);
-    if (Math.abs(centsDifference) < 50) {
+    if (Math.abs(centsDifference) < 50) isCorrectPitch = true;
+  }
+
+  if (isCorrectPitch) {
+    if (!state.scoring.isHoldingNote) {
+      // Just started holding a correct note
+      state.scoring.isHoldingNote = true;
+      state.scoring.noteHoldStartTime = performance.now();
+    }
+    if (!state.scoring.hasHitCurrentNote) {
+      // First time hitting this note
       state.scoring.notesHit++;
       state.scoring.hasHitCurrentNote = true;
     }
-  }
 
-  // 3. Final Score Calculation
-  if (state.scoring.totalScorableNotes > 0) {
-    state.scoring.score = Math.round(
-      (state.scoring.notesHit / state.scoring.totalScorableNotes) * 100,
-    );
+    // Transition Scoring (only happens once at the start of a note)
+    if (
+      !state.scoring.hasScoredCurrentTransition &&
+      state.scoring.lastGuidePitch > 0
+    ) {
+      const analysisStartTime =
+        performance.now() - TRANSITION_ANALYSIS_WINDOW_MS;
+      const recentPitches = state.scoring.pitchHistory
+        .filter(
+          (p) =>
+            p.time >= analysisStartTime && p.clarity > MIC_CLARITY_THRESHOLD,
+        )
+        .map((p) => p.pitch);
+
+      if (recentPitches.length > 5) {
+        const startPitch = recentPitches[0];
+        const endPitch = recentPitches[recentPitches.length - 1];
+        // Upband hit
+        if (
+          guidePitch > state.scoring.lastGuidePitch * 1.05 &&
+          endPitch > startPitch
+        ) {
+          state.scoring.upbandsHit++;
+          state.scoring.hasScoredCurrentTransition = true;
+        }
+        // Downband hit
+        else if (
+          guidePitch < state.scoring.lastGuidePitch * 0.95 &&
+          endPitch < startPitch
+        ) {
+          state.scoring.downbandsHit++;
+          state.scoring.hasScoredCurrentTransition = true;
+        }
+      }
+    }
+
+    // Vibrato detection
+    const holdDuration = performance.now() - state.scoring.noteHoldStartTime;
+    if (holdDuration > VIBRATO_HOLD_DURATION_MS) {
+      const recentPitches = state.scoring.pitchHistory
+        .filter((p) => p.clarity > MIC_CLARITY_THRESHOLD)
+        .map((p) => p.pitch);
+      if (recentPitches.length > 10) {
+        const mean =
+          recentPitches.reduce((a, b) => a + b, 0) / recentPitches.length;
+        const stdDev = Math.sqrt(
+          recentPitches
+            .map((x) => Math.pow(x - mean, 2))
+            .reduce((a, b) => a + b) / recentPitches.length,
+        );
+        if (stdDev >= VIBRATO_STD_DEV_MIN && stdDev <= VIBRATO_STD_DEV_MAX) {
+          state.scoring.vibratoNotesHit++;
+          // Credit opportunity here and stop checking for this note
+          state.scoring.vibratoOpportunities++;
+          state.scoring.isHoldingNote = false; // Prevents re-triggering
+        }
+      }
+    }
   } else {
-    state.scoring.score = 0;
+    // Not correct pitch
+    if (state.scoring.isHoldingNote) {
+      // Just fell off a note
+      const holdDuration = performance.now() - state.scoring.noteHoldStartTime;
+      if (holdDuration > VIBRATO_HOLD_DURATION_MS) {
+        state.scoring.vibratoOpportunities++;
+      }
+    }
+    state.scoring.isHoldingNote = false;
   }
 
-  // 4. Update the highest score tracker
-  state.scoring.highestScoreThisSong = Math.max(
-    state.scoring.highestScoreThisSong,
-    state.scoring.score,
-  );
+  // --- 4. FINAL SCORE COMPOSITION ---
+  const s = state.scoring;
+  const pitchAndRhythm =
+    s.totalScorableNotes > 0 ? (s.notesHit / s.totalScorableNotes) * 100 : 0;
+  const vibrato =
+    s.vibratoOpportunities > 0
+      ? (s.vibratoNotesHit / s.vibratoOpportunities) * 100
+      : 0;
+  const upband =
+    s.upbandOpportunities > 0
+      ? (s.upbandsHit / s.upbandOpportunities) * 100
+      : 0;
+  const downband =
+    s.downbandOpportunities > 0
+      ? (s.downbandsHit / s.downbandOpportunities) * 100
+      : 0;
 
-  // Dispatch event with the HIGHEST score, so the UI never dips.
+  // Update state, ensuring scores never dip and are capped at 100
+  s.details.pitchAndRhythm = Math.max(
+    s.details.pitchAndRhythm,
+    Math.min(100, pitchAndRhythm),
+  );
+  s.details.vibrato = Math.max(s.details.vibrato, Math.min(100, vibrato));
+  s.details.upband = Math.max(s.details.upband, Math.min(100, upband));
+  s.details.downband = Math.max(s.details.downband, Math.min(100, downband));
+
+  // Final score is a weighted average of the four criteria (25% each)
+  s.finalScore =
+    (s.details.pitchAndRhythm +
+      s.details.vibrato +
+      s.details.upband +
+      s.details.downband) /
+    4;
+
+  // --- 5. DISPATCH UPDATE ---
   document.dispatchEvent(
     new CustomEvent("CherryTree.Forte.Scoring.Update", {
-      detail: { score: state.scoring.highestScoreThisSong },
+      detail: pkg.data.getScoringState(),
     }),
   );
 }
@@ -655,13 +795,13 @@ const pkg = {
     },
 
     playTrack: () => {
-      if (toastElement) {
-        if (toastTimeout) clearTimeout(toastTimeout);
-        toastElement.classOn("visible");
-        toastTimeout = setTimeout(() => {
-          toastElement.classOff("visible");
-        }, 3000);
-      }
+      // if (toastElement) {
+      //   if (toastTimeout) clearTimeout(toastTimeout);
+      //   toastElement.classOn("visible");
+      //   toastTimeout = setTimeout(() => {
+      //     toastElement.classOff("visible");
+      //   }, 3000);
+      // }
 
       if (audioContext.state === "suspended") {
         audioContext.resume();
@@ -683,26 +823,44 @@ const pkg = {
 
         if (state.playback.isMultiplexed) {
           // --- START: SCORING ENGINE ---
-          // Enable scoring and RESET all cumulative scoring variables
+          // Reset all scoring variables to their initial state for a new song
           state.scoring.enabled = true;
-          state.scoring.score = 0;
-          state.scoring.highestScoreThisSong = 0;
-          state.scoring.notesHit = 0;
+          state.scoring.finalScore = 0;
+          state.scoring.details = {
+            pitchAndRhythm: 0,
+            vibrato: 0,
+            upband: 0,
+            downband: 0,
+          };
           state.scoring.totalScorableNotes = 0;
+          state.scoring.notesHit = 0;
+          state.scoring.vibratoOpportunities = 0;
+          state.scoring.vibratoNotesHit = 0;
+          state.scoring.upbandOpportunities = 0;
+          state.scoring.upbandsHit = 0;
+          state.scoring.downbandOpportunities = 0;
+          state.scoring.downbandsHit = 0;
+          state.scoring.lastGuidePitch = 0;
+          state.scoring.pitchHistory = [];
           state.scoring.isVocalGuideNoteActive = false;
           state.scoring.hasHitCurrentNote = false;
-          state.scoring.guideNoteDebounceStart = 0;
+          state.scoring.isHoldingNote = false;
 
           // Create the analysis graph
           const vocalGuideAnalyser = audioContext.createAnalyser();
           vocalGuideAnalyser.fftSize = 2048;
           state.scoring.vocalGuideAnalyser = vocalGuideAnalyser;
 
-          // --- LATENCY COMPENSATION ---
+          // --- DYNAMIC LATENCY COMPENSATION ---
           const delayNode = audioContext.createDelay();
-          delayNode.delayTime.value = LATENCY_COMPENSATION_S;
+          // Use the automatically measured latency + a small base offset
+          delayNode.delayTime.value = state.scoring.measuredLatencyS + 0.1;
           state.scoring.guideVocalDelayNode = delayNode;
-          // --- END LATENCY COMPENSATION ---
+          console.log(
+            `[FORTE SVC] Applying total guide delay of ${delayNode.delayTime.value.toFixed(
+              3,
+            )}s`,
+          );
 
           const splitter = audioContext.createChannelSplitter(2);
           const merger = audioContext.createChannelMerger(1);
@@ -892,6 +1050,13 @@ const pkg = {
       dispatchPlaybackUpdate();
     },
 
+    getScoringState: () => {
+      return {
+        finalScore: state.scoring.finalScore,
+        details: state.scoring.details,
+      };
+    },
+
     getPlaybackState: () => {
       let duration = 0;
       let currentTime = 0;
@@ -925,7 +1090,7 @@ const pkg = {
         decodedLyrics: state.playback.decodedLyrics,
         transpose: state.playback.transpose,
         multiplexPan: state.playback.multiplexPan,
-        score: state.scoring.highestScoreThisSong, // Report the highest score
+        score: pkg.data.getScoringState(), // Report the detailed score object
       };
     },
 
@@ -934,6 +1099,97 @@ const pkg = {
       console.log("[FORTE SVC] Initializing Scoring Engine...");
       await pkg.data.getMicDevices();
       await pkg.data.startMicInput(state.scoring.currentMicDeviceId);
+    },
+
+    // --- NEW: LATENCY CALIBRATION FUNCTION ---
+    /**
+     * Performs an automatic audio latency test.
+     * Your UI should call this function and instruct the user to be quiet.
+     * @returns {Promise<number>} The measured latency in seconds.
+     */
+    runLatencyTest: async () => {
+      if (!audioContext || !state.scoring.micAnalyser) {
+        console.error(
+          "[FORTE SVC] Cannot run latency test: audio context or mic not ready.",
+        );
+        return state.scoring.measuredLatencyS;
+      }
+
+      console.log("[FORTE SVC] Starting latency test...");
+
+      const analyser = state.scoring.micAnalyser;
+      const buffer = new Float32Array(analyser.fftSize);
+      let timeoutId;
+
+      const testPromise = new Promise((resolve, reject) => {
+        let listening = false;
+        let startTime = 0;
+
+        // Create a sharp test tone
+        const osc = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(1000, audioContext.currentTime); // 1kHz tone
+        gain.gain.setValueAtTime(0, audioContext.currentTime);
+        osc.connect(gain).connect(masterGain);
+        osc.start();
+
+        const checkMic = () => {
+          if (!listening) {
+            requestAnimationFrame(checkMic);
+            return;
+          }
+          analyser.getFloatTimeDomainData(buffer);
+          const rms = Math.sqrt(
+            buffer.reduce((s, v) => s + v * v, 0) / buffer.length,
+          );
+
+          // Use a threshold to detect the tone's arrival
+          if (rms > 0.01) {
+            // This threshold may need tweaking
+            const latencyMs = performance.now() - startTime;
+            console.log(
+              `[FORTE SVC] Latency detected: ${latencyMs.toFixed(2)} ms`,
+            );
+            state.scoring.measuredLatencyS = latencyMs / 1000;
+            osc.stop();
+            gain.disconnect();
+            clearTimeout(timeoutId);
+            resolve(state.scoring.measuredLatencyS);
+          } else {
+            requestAnimationFrame(checkMic);
+          }
+        };
+
+        // Start listening, then play the tone
+        listening = true;
+        checkMic();
+
+        startTime = performance.now();
+        gain.gain.linearRampToValueAtTime(1.0, audioContext.currentTime + 0.01);
+        gain.gain.linearRampToValueAtTime(0.0, audioContext.currentTime + 0.06);
+
+        timeoutId = setTimeout(() => {
+          listening = false;
+          osc.stop();
+          gain.disconnect();
+          reject(new Error("Latency test timed out. No sound detected."));
+        }, 2000); // 5-second timeout
+      });
+
+      try {
+        return await testPromise;
+      } catch (e) {
+        console.warn(`[FORTE SVC] ${e.message}. Using fallback latency.`);
+        // Use the browser's estimated output latency if available, otherwise use the sensible default.
+        state.scoring.measuredLatencyS = audioContext.baseLatency || 0.05;
+        console.warn(
+          `[FORTE SVC] Fallback latency set to ${state.scoring.measuredLatencyS.toFixed(
+            3,
+          )}s (baseLatency: ${audioContext.baseLatency || "N/A"})`,
+        );
+        return state.scoring.measuredLatencyS; // Return fallback value
+      }
     },
 
     getMicDevices: async () => {

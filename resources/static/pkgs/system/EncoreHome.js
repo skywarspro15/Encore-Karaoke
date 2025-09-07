@@ -278,328 +278,120 @@ const Romanizer = {
   },
 };
 
-// --- START: OSD Modules & Manager ---
-function updateOsdPositions() {
-  let currentBottom = 2; // in rem
-  const osdHeight = 6; // approximate height of one OSD box in rem
+// --- InfoBar Module ---
+const InfoBar = {
+  bar: null,
+  labelEl: null,
+  contentEl: null,
+  timeout: null,
+  isPersistent: false,
+  maxLength: 5, // Should match state.maxLength
 
-  if (VolumeOSD.visible) {
-    VolumeOSD.osd.styleJs({ bottom: `${currentBottom}rem` });
-    currentBottom += osdHeight;
-  }
-  if (TransposeOSD.visible) {
-    TransposeOSD.osd.styleJs({ bottom: `${currentBottom}rem` });
-    currentBottom += osdHeight;
-  }
-  if (MultiplexPanOSD.visible) {
-    MultiplexPanOSD.osd.styleJs({ bottom: `${currentBottom}rem` });
-    currentBottom += osdHeight;
-  }
-  if (ScoreOSD.visible) {
-    ScoreOSD.osd.styleJs({ bottom: `${currentBottom}rem` });
-    currentBottom += osdHeight;
-  }
-}
+  init(container, maxLength) {
+    this.maxLength = maxLength;
+    this.bar = new Html("div").class("info-bar").appendTo(container);
+    this.labelEl = new Html("div").class("info-bar-label").appendTo(this.bar);
+    this.contentEl = new Html("div")
+      .class("info-bar-content")
+      .appendTo(this.bar);
+    this.showDefault(); // Set initial state
+  },
 
-const ScoreOSD = {
-  osd: null,
-  visible: false,
+  // Shows a message.
+  // - If options.duration is set, it's temporary and reverts to default after ms.
+  // - Otherwise, it's persistent until cleared or overwritten.
+  show(label, content, options = {}) {
+    if (this.timeout) clearTimeout(this.timeout);
+
+    this.isPersistent = !options.duration;
+
+    this.labelEl.text(label);
+    this.contentEl.html(content); // Use .html() to allow formatted content
+
+    if (options.duration) {
+      this.timeout = setTimeout(() => {
+        this.timeout = null;
+        if (!this.isPersistent) {
+          // Check again in case a persistent msg was shown
+          this.showDefault();
+        }
+      }, options.duration);
+    }
+  },
+
+  // Shows the default state (Up Next song)
+  showDefault() {
+    this.isPersistent = false;
+    const { reservationQueue, songMap } = this.context();
+    if (reservationQueue.length > 0) {
+      const nextCode = reservationQueue[0];
+      const nextSong = songMap.get(nextCode);
+      const extra =
+        reservationQueue.length > 1 ? ` (+${reservationQueue.length - 1})` : "";
+
+      if (nextSong) {
+        const content = `<span class="info-bar-code">${nextSong.code}</span>
+                         <span class="info-bar-title">${nextSong.title}</span>
+                         <span class="info-bar-artist">- ${nextSong.artist}${extra}</span>`;
+        this.show("UP NEXT", content);
+      } else {
+        this.show("UP NEXT", `Song ${nextCode}${extra}`);
+      }
+    } else {
+      this.show("UP NEXT", "—");
+    }
+    this.isPersistent = false; // showDefault should never be persistent
+  },
+
+  // Special handler for showing reservation input
+  showReservation(reservationNumber) {
+    const { songMap } = this.context();
+    const displayCode = reservationNumber.padStart(this.maxLength, "0");
+    const song = songMap.get(displayCode);
+    let songInfo = "";
+
+    if (song) {
+      songInfo = `<span class="info-bar-title">${song.title}</span>
+                  <span class="info-bar-artist">- ${song.artist}</span>`;
+    } else if (reservationNumber.length === this.maxLength) {
+      songInfo = `<span style="opacity: 0.5;">No song found.</span>`;
+    }
+
+    const content = `<span class="info-bar-code">${displayCode}</span> ${songInfo}`;
+    this.show("RESERVING", content);
+  },
+
+  // Called from outside to give the module context to the current state
+  // This avoids passing state into every single call.
+  context() {
+    // This is a placeholder that will be replaced in pkg.start
+    return { reservationQueue: [], songMap: new Map() };
+  },
+};
+
+// --- ScoreHUD Module ---
+const ScoreHUD = {
+  hud: null,
+  scoreDisplay: null,
 
   init(container) {
-    const osd = new Html("div")
-      .styleJs({
-        position: "absolute",
-        right: "2rem",
-        bottom: "2rem",
-        display: "flex",
-        flexDirection: "column",
-        gap: "0.75rem",
-        fontFamily: "'Rajdhani', sans-serif",
-        fontWeight: "700",
-        opacity: "0",
-        transition: "opacity 0.3s ease, bottom 0.3s ease",
-        pointerEvents: "none",
-        zIndex: 100000,
-      })
-      .appendTo(container);
-
-    const osdBox = new Html("div")
-      .styleJs({
-        background: "rgba(0,0,0,0.7)",
-        border: "1px solid rgba(255,255,255,0.3)",
-        borderRadius: "0.5rem",
-        padding: "0.6rem 1.2rem",
-        minWidth: "240px",
-      })
-      .appendTo(osd);
-
-    new Html("div")
-      .styleJs({
-        color: "#FFD700",
-        fontSize: "1rem",
-        letterSpacing: "0.1rem",
-        marginBottom: "0.25rem",
-      })
-      .text("SCORE")
-      .appendTo(osdBox);
-
+    this.hud = new Html("div").class("score-hud").appendTo(container);
+    new Html("div").class("score-hud-label").text("SCORE").appendTo(this.hud);
     this.scoreDisplay = new Html("div")
-      .styleJs({
-        color: "#89CFF0",
-        fontSize: "2rem",
-        letterSpacing: "0.2rem",
-        textAlign: "center",
-      })
-      .appendTo(osdBox);
-
-    this.osd = osd;
+      .class("score-hud-value")
+      .appendTo(this.hud);
+    this.hide();
   },
 
   show(score) {
-    if (!this.visible) {
-      this.osd.styleJs({ opacity: "1" });
-      this.visible = true;
-      updateOsdPositions();
-    }
-    this.scoreDisplay.text(score);
+    this.scoreDisplay.text(Math.floor(score));
+    this.hud.classOn("visible");
   },
 
   hide() {
-    if (this.visible) {
-      this.osd.styleJs({ opacity: "0" });
-      this.visible = false;
-      updateOsdPositions();
-    }
+    this.hud.classOff("visible");
   },
 };
-
-const MultiplexPanOSD = {
-  osd: null,
-  timeout: null,
-  visible: false,
-
-  init(container) {
-    const osd = new Html("div")
-      .styleJs({
-        position: "absolute",
-        right: "2rem",
-        bottom: "2rem",
-        display: "flex",
-        flexDirection: "column",
-        gap: "0.75rem",
-        fontFamily: "'Rajdhani', sans-serif",
-        fontWeight: "700",
-        opacity: "0",
-        transition: "opacity 0.3s ease, bottom 0.3s ease",
-        pointerEvents: "none",
-        zIndex: 100000,
-      })
-      .appendTo(container);
-
-    const osdBox = new Html("div")
-      .styleJs({
-        background: "rgba(0,0,0,0.7)",
-        border: "1px solid rgba(255,255,255,0.3)",
-        borderRadius: "0.5rem",
-        padding: "0.6rem 1.2rem",
-        minWidth: "240px",
-      })
-      .appendTo(osd);
-
-    new Html("div")
-      .styleJs({
-        color: "#FFD700",
-        fontSize: "1rem",
-        letterSpacing: "0.1rem",
-        marginBottom: "0.25rem",
-      })
-      .text("VOCAL BALANCE")
-      .appendTo(osdBox);
-
-    this.panDisplay = new Html("div")
-      .styleJs({
-        color: "#89CFF0",
-        fontSize: "2rem",
-        letterSpacing: "0.2rem",
-        textAlign: "center",
-      })
-      .appendTo(osdBox);
-
-    this.osd = osd;
-  },
-
-  show(panValue) {
-    if (this.timeout) clearTimeout(this.timeout);
-
-    let displayText = "";
-    if (panValue <= -0.99) {
-      displayText = "INSTRUMENTAL";
-    } else if (panValue >= 0.99) {
-      displayText = "VOCAL GUIDE";
-    } else if (panValue > -0.01 && panValue < 0.01) {
-      displayText = "BALANCED";
-    } else if (panValue < 0) {
-      displayText = `◀ ${Math.abs(Math.round(panValue * 100))}% INST`;
-    } else {
-      displayText = `VOC ${Math.round(panValue * 100)}% ▶`;
-    }
-    this.panDisplay.text(displayText);
-
-    this.osd.styleJs({ opacity: "1" });
-    this.visible = true;
-    updateOsdPositions();
-
-    this.timeout = setTimeout(() => {
-      this.osd.styleJs({ opacity: "0" });
-      this.visible = false;
-      updateOsdPositions();
-    }, 3000);
-  },
-};
-
-const TransposeOSD = {
-  osd: null,
-  timeout: null,
-  visible: false,
-
-  init(container) {
-    const osd = new Html("div")
-      .styleJs({
-        position: "absolute",
-        right: "2rem",
-        bottom: "2rem",
-        display: "flex",
-        flexDirection: "column",
-        gap: "0.75rem",
-        fontFamily: "'Rajdhani', sans-serif",
-        fontWeight: "700",
-        opacity: "0",
-        transition: "opacity 0.3s ease, bottom 0.3s ease",
-        pointerEvents: "none",
-        zIndex: 100000,
-      })
-      .appendTo(container);
-
-    const osdBox = new Html("div")
-      .styleJs({
-        background: "rgba(0,0,0,0.7)",
-        border: "1px solid rgba(255,255,255,0.3)",
-        borderRadius: "0.5rem",
-        padding: "0.6rem 1.2rem",
-        minWidth: "240px",
-      })
-      .appendTo(osd);
-
-    new Html("div")
-      .styleJs({
-        color: "#FFD700",
-        fontSize: "1rem",
-        letterSpacing: "0.1rem",
-        marginBottom: "0.25rem",
-      })
-      .text("TRANSPOSE")
-      .appendTo(osdBox);
-
-    this.transposeDisplay = new Html("div")
-      .styleJs({
-        color: "#89CFF0",
-        fontSize: "2rem",
-        letterSpacing: "0.2rem",
-        textAlign: "center",
-      })
-      .appendTo(osdBox);
-
-    this.osd = osd;
-  },
-
-  show(semitones) {
-    if (this.timeout) clearTimeout(this.timeout);
-    const sign = semitones > 0 ? "+" : "";
-    this.transposeDisplay.text(`${sign}${semitones}`);
-
-    this.osd.styleJs({ opacity: "1" });
-    this.visible = true;
-    updateOsdPositions();
-
-    this.timeout = setTimeout(() => {
-      this.osd.styleJs({ opacity: "0" });
-      this.visible = false;
-      updateOsdPositions();
-    }, 3000);
-  },
-};
-
-const VolumeOSD = {
-  osd: null,
-  timeout: null,
-  visible: false,
-
-  init(container) {
-    const osd = new Html("div")
-      .styleJs({
-        position: "absolute",
-        right: "2rem",
-        bottom: "2rem",
-        display: "flex",
-        flexDirection: "column",
-        gap: "0.75rem",
-        fontFamily: "'Rajdhani', sans-serif",
-        fontWeight: "700",
-        opacity: "0",
-        transition: "opacity 0.3s ease, bottom 0.3s ease",
-        pointerEvents: "none",
-        zIndex: 100000,
-      })
-      .appendTo(container);
-
-    const osdBox = new Html("div")
-      .styleJs({
-        background: "rgba(0,0,0,0.7)",
-        border: "1px solid rgba(255,255,255,0.3)",
-        borderRadius: "0.5rem",
-        padding: "0.6rem 1.2rem",
-        minWidth: "240px",
-      })
-      .appendTo(osd);
-
-    new Html("div")
-      .styleJs({
-        color: "#FFD700",
-        fontSize: "1rem",
-        letterSpacing: "0.1rem",
-        marginBottom: "0.25rem",
-      })
-      .text("VOLUME")
-      .appendTo(osdBox);
-
-    this.volumeDisplay = new Html("div")
-      .styleJs({
-        color: "#89CFF0",
-        fontSize: "2rem",
-        letterSpacing: "0.2rem",
-        textAlign: "center",
-      })
-      .appendTo(osdBox);
-
-    this.osd = osd;
-  },
-
-  show(volume) {
-    if (this.timeout) clearTimeout(this.timeout);
-    this.volumeDisplay.text(`${Math.round(volume * 100)}%`);
-
-    this.osd.styleJs({ opacity: "1" });
-    this.visible = true;
-    updateOsdPositions();
-
-    this.timeout = setTimeout(() => {
-      this.osd.styleJs({ opacity: "0" });
-      this.visible = false;
-      updateOsdPositions();
-    }, 3000);
-  },
-};
-// --- END: OSD Modules & Manager ---
 
 const pkg = {
   name: "Encore Home",
@@ -616,12 +408,7 @@ const pkg = {
 
     // --- START: Added SFX Pre-loading ---
     console.log("[Encore] Preloading UI sound effects...");
-    const sfxToLoad = [
-      "deck_ui_into_game_detail.wav",
-      "deck_ui_navigation.wav",
-      "deck_ui_out_of_game_detail.wav",
-      "score_tally.wav",
-    ];
+    const sfxToLoad = ["score_tally.wav"];
     for (let i = 0; i < 10; i++) {
       sfxToLoad.push(`numbers/${i}.wav`);
     }
@@ -637,6 +424,7 @@ const pkg = {
     const songList = FsSvc.getSongList();
     const songMap = new Map(songList.map((song) => [song.code, song]));
     let songItemElements = [];
+    const maxLength = 5;
     let state = {
       mode: "menu", // 'menu', 'player', 'yt-search'
       songNumber: "",
@@ -644,14 +432,19 @@ const pkg = {
       reservationNumber: "",
       reservationQueue: [],
       volume: config.audioConfig.mix.instrumental.volume,
-      volumeOsdTimeout: null,
       searchResults: [],
       highlightedSearchIndex: -1,
       isSearching: false,
       currentSongIsYouTube: false,
       currentSongIsMultiplexed: false, // Track if the current song can be scored
+      isTransitioning: false, // FIX: Add the transition lock flag
     };
-    const maxLength = 5;
+
+    // Give InfoBar access to the current state and songMap
+    InfoBar.context = () => ({
+      reservationQueue: state.reservationQueue,
+      songMap: songMap,
+    });
 
     window.desktopIntegration.ipc.send("setRPC", {
       details: `Browsing ${songList.length} Songs...`,
@@ -676,10 +469,62 @@ const pkg = {
       .class("player-ui", "hidden")
       .appendTo(wrapper);
 
-    VolumeOSD.init(wrapper);
-    TransposeOSD.init(wrapper);
-    MultiplexPanOSD.init(wrapper);
-    ScoreOSD.init(wrapper);
+    // --- DETAILED SCORE SCREEN ELEMENT CREATION ---
+    const postSongScoreScreen = new Html("div")
+      .class("post-song-score-screen")
+      .appendTo(wrapper);
+    const scoreCard = new Html("div")
+      .class("score-card")
+      .appendTo(postSongScoreScreen);
+    const scoreHeader = new Html("div")
+      .class("score-header")
+      .appendTo(scoreCard);
+    new Html("div")
+      .class("score-header-title")
+      .text("PERFECT PITCH")
+      .appendTo(scoreHeader);
+    new Html("div")
+      .class("score-header-subtitle")
+      .text("ADVANCED SCORING")
+      .appendTo(scoreHeader);
+    const scoreMain = new Html("div").class("score-main").appendTo(scoreCard);
+    const finalScoreContainer = new Html("div")
+      .class("final-score-container")
+      .appendTo(scoreMain);
+    new Html("div")
+      .class("final-score-label")
+      .text("YOUR SCORE")
+      .appendTo(finalScoreContainer);
+    const finalScoreDisplay = new Html("div")
+      .class("final-score")
+      .appendTo(finalScoreContainer);
+    const scoreDetails = new Html("div")
+      .class("score-details")
+      .appendTo(scoreCard);
+    const createGauge = (label, className) => {
+      const container = new Html("div")
+        .class("score-gauge-container")
+        .appendTo(scoreDetails);
+      new Html("span")
+        .class("score-gauge-label")
+        .text(label)
+        .appendTo(container);
+      const gauge = new Html("div")
+        .class("score-gauge", className)
+        .appendTo(container);
+      const valueDisplay = new Html("span")
+        .class("score-gauge-value")
+        .appendTo(gauge);
+      return { gauge, valueDisplay };
+    };
+    const keyRhythmGauge = createGauge("Key/Rhythm", "gauge-key-rhythm");
+    const vibratoGauge = createGauge("Vibrato", "gauge-vibrato");
+    const upbandGauge = createGauge("Upband", "gauge-upband");
+    const downbandGauge = createGauge("Downband", "gauge-downband");
+
+    // Initialize the new UI Modules
+    InfoBar.init(wrapper, maxLength);
+    ScoreHUD.init(wrapper);
 
     new Html("style")
       .text(
@@ -724,7 +569,7 @@ const pkg = {
         .search-channel { font-size: 0.9rem; opacity: 0.7; }
 
         .player-ui { position: absolute; inset: 0; padding: 2rem; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; transition: opacity 0.3s ease-out; background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 50%); z-index: 15; }
-        .lyrics-container, .midi-lyrics-container { width: 100%; max-width: 1200px; height: 350px; position: relative; }
+        .lyrics-container, .midi-lyrics-container { width: 100%; max-width: 1200px; height: 350px; position: relative; transition: opacity 0.3s ease; }
         .lyrics-container { overflow: hidden; }
         .midi-lyrics-container { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 1rem; }
         .lyrics-scroller { position: relative; width: 100%; transition: transform 0.4s ease-in-out; }
@@ -735,58 +580,64 @@ const pkg = {
         .lyric-line-original { line-height: 1.2; }
         .lyric-line-romanized { font-size: 1.5rem; color: rgba(255, 255, 255, 0.5); line-height: 1.1; font-weight: 500; letter-spacing: 0.05em; }
         .lyric-line.active .lyric-line-romanized { color: #89CFF0; }
+        
         .midi-lyric-line { display: flex; justify-content: center; flex-wrap: nowrap; white-space: pre; color: rgba(255, 255, 255, 0.4); }
         .midi-lyric-line.next { opacity: 0.5; }
-        .lyric-syllable-container { display: inline-flex; flex-direction: column; align-items: center; margin: 0 0.1em; transition: transform 0.1s ease; }
-        .lyric-syllable-original { font-size: inherit; color: rgba(255, 255, 255, 0.4); transition: color 0.1s linear; }
-        .lyric-syllable-romanized { font-size: 1rem; color: rgba(255, 255, 255, 0.4); margin-top: 0.25rem; line-height: 1; font-weight: 500; transition: color 0.1s linear; }
-        .lyric-syllable-container.active { transform: scale(1.1); }
-        .lyric-syllable-container.active .lyric-syllable-original,
-        .lyric-syllable-container.active .lyric-syllable-romanized { color: #89CFF0; }
+        .lyric-syllable-container { display: inline-flex; flex-direction: column; align-items: center; margin: 0; }
+        .lyric-syllable-original, .lyric-syllable-romanized { position: relative; color: rgba(255, 255, 255, 0.4); }
+        .lyric-syllable-original::after, .lyric-syllable-romanized::after { content: attr(data-text); position: absolute; top: 0; left: 0; width: 0; color: #89CFF0; overflow: hidden; transition: width 0.1s linear; }
+        .lyric-syllable-container.active .lyric-syllable-original::after,
+        .lyric-syllable-container.active .lyric-syllable-romanized::after { width: 100%; }
+        .lyric-syllable-original { font-size: inherit; }
+        .lyric-syllable-romanized { font-size: 1rem; margin-top: 0.25rem; line-height: 1; font-weight: 500; }
+        
         .player-progress { width: 100%; max-width: 1200px; height: 10px; background: rgba(255,255,255,0.2); border-radius: 5px; margin-top: 2rem; }
         .progress-bar { width: 0%; height: 100%; background-color: #89CFF0; border-radius: 5px; transition: width 0.1s linear; }
-        .karaoke-hud { position: absolute; top: 2rem; right: 2rem; display: flex; flex-direction: column; gap: 0.75rem; font-family: 'Rajdhani', sans-serif; font-weight: 700; z-index: 25; }
-        .hud-box { background: rgba(0,0,0,0.7); border: 1px solid rgba(255,255,255,0.3); border-radius: 0.5rem; padding: 0.6rem 1.2rem; min-width: 280px; }
-        .hud-label { color: #FFD700; font-size: 1rem; letter-spacing: 0.1rem; margin-bottom: 0.25rem; }
-        .reservation-code { color: #89CFF0; font-size: 2.5rem; letter-spacing: 0.2rem; text-align: center; }
-        .up-next-title { font-size: 1.4rem; color: #fff; text-shadow: 1px 1px 3px #000; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .up-next-artist { font-size: 1rem; color: #fff; opacity: 0.7; }
-        .mode-menu .karaoke-hud, .mode-yt-search .karaoke-hud { display: none; }
         
-        .post-song-score-screen {
-            position: absolute;
-            inset: 0;
-            background: rgba(0,0,0,0.7);
-            backdrop-filter: blur(10px);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            z-index: 50;
-            opacity: 0;
-            transition: opacity 0.5s ease;
-            pointer-events: none;
-        }
-        .post-song-score-screen.visible {
-            opacity: 1;
-        }
-        .score-title {
-            font-family: 'Rajdhani', sans-serif;
-            font-size: 3rem;
-            font-weight: 700;
-            color: #FFD700;
-            letter-spacing: 0.2rem;
-            text-shadow: 0 0 10px #FFD700;
-        }
-        .final-score {
-            font-family: 'Orbitron', sans-serif;
-            font-size: 15rem;
-            font-weight: 900;
-            line-height: 1;
-            text-shadow: 0 0 10px #fff, 0 0 20px #89CFF0, 0 0 30px #89CFF0;
-            color: #f0f0f0;
-        }
+        /* --- Intro Card --- */
+        .intro-card { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.95); width: 80%; max-width: 900px; padding: 2rem 3rem; background: linear-gradient(105deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 27, 75, 0.95) 100%); border: 1px solid rgba(137, 207, 240, 0.4); border-radius: 1.5rem; box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: left; font-family: 'Rajdhani', sans-serif; color: white; z-index: 16; opacity: 0; transition: opacity 0.4s ease-out, transform 0.4s ease-out; pointer-events: none; display: flex; flex-direction: column; gap: 0.5rem; }
+        .intro-card.visible { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        .intro-card-title, .intro-card-artist { opacity: 0; transform: translateY(20px); transition: opacity 0.4s ease-out, transform 0.4s ease-out; }
+        .intro-card.visible .intro-card-title { opacity: 1; transform: translateY(0); transition-delay: 0.2s; }
+        .intro-card.visible .intro-card-artist { opacity: 1; transform: translateY(0); transition-delay: 0.3s; }
+        .intro-card-title { font-size: 4rem; font-weight: 700; letter-spacing: 0.05em; line-height: 1.1; text-shadow: 2px 2px 8px rgba(0,0,0,0.5); }
+        .intro-card-artist { font-size: 1.5rem; font-weight: 500; opacity: 0.8; border-top: 1px solid rgba(255,255,255,0.3); padding-top: 0.75rem; margin-top: 0.5rem; }
+
+        /* --- Info Bar & Score HUD Styles --- */
+        .info-bar { position: absolute; top: 2rem; left: 3rem; right: 3rem; height: 50px; display: flex; align-items: stretch; background: rgba(0,0,0,0.7); border: 1px solid rgba(255,255,255,0.2); border-radius: 0.5rem; font-family: 'Rajdhani', sans-serif; color: white; z-index: 25; overflow: hidden; opacity: 0; transition: opacity 0.3s ease; pointer-events: none; }
+        .mode-player .info-bar { opacity: 1; pointer-events: auto; }
+        .info-bar-label { flex: 0 0 160px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.3); font-size: 1.2rem; font-weight: 700; color: #FFD700; letter-spacing: 0.1rem; border-right: 1px solid rgba(255,255,255,0.2); }
+        .info-bar-content { flex-grow: 1; display: flex; align-items: center; gap: 1rem; padding: 0 1.5rem; font-size: 1.6rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .info-bar-code { font-weight: 700; color: #89CFF0; letter-spacing: 0.1rem; }
+        .info-bar-title { font-weight: bold; }
+        .info-bar-artist { opacity: 0.7; }
+        
+        .score-hud { position: absolute; bottom: 2rem; right: 3rem; padding: 0.5rem 1.2rem; background: rgba(0,0,0,0.7); border: 1px solid rgba(255,255,255,0.2); border-radius: 0.5rem; font-family: 'Rajdhani', sans-serif; color: white; z-index: 26; display: flex; flex-direction: row; align-items: baseline; gap: 0.75rem; opacity: 0; transition: opacity 0.3s ease, bottom 0.3s ease; pointer-events: none; }
+        .score-hud.visible { opacity: 1; }
+        .score-hud-label { font-size: 1rem; font-weight: 700; color: #FFD700; letter-spacing: 0.1rem; }
+        .score-hud-value { font-size: 2.5rem; font-weight: 700; color: #89CFF0; letter-spacing: 0.1rem; line-height: 1; }
+
+        /* --- DETAILED SCORE SCREEN STYLES --- */
+        .post-song-score-screen { position: absolute; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(10px); display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; z-index: 50; opacity: 0; transition: opacity 0.5s ease; pointer-events: none; }
+        .post-song-score-screen.visible { opacity: 1; pointer-events: all; }
+        .score-card { background: linear-gradient(145deg, rgba(20, 20, 40, 0.85), rgba(10, 10, 20, 0.9)); border: 1px solid rgba(137, 207, 240, 0.4); border-radius: 1rem; width: 90%; max-width: 900px; padding: 2rem; box-shadow: 0 10px 30px rgba(0,0,0,0.5); font-family: 'Rajdhani', sans-serif; }
+        .score-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 1rem; margin-bottom: 1.5rem; }
+        .score-header-title { font-size: 2.5rem; font-weight: 700; letter-spacing: 0.1em; color: #89CFF0; text-shadow: 0 0 5px #89CFF0; }
+        .score-header-subtitle { font-size: 1.5rem; opacity: 0.8; }
+        .score-main { display: flex; justify-content: center; align-items: center; margin-bottom: 2rem; }
+        .final-score-container { text-align: center; }
+        .final-score { font-family: 'Orbitron', sans-serif; font-size: 10rem; font-weight: 900; line-height: 1; text-shadow: 0 0 10px #fff, 0 0 20px #89CFF0, 0 0 30px #89CFF0; color: #f0f0f0; }
+        .final-score-label { font-size: 1.2rem; color: #FFD700; letter-spacing: 0.2rem; }
+        .score-details { display: flex; justify-content: space-around; gap: 1rem; padding-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.2); }
+        .score-gauge-container { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+        .score-gauge-label { font-size: 1.2rem; font-weight: 700; }
+        .score-gauge { position: relative; width: 140px; height: 140px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background-color: rgba(0,0,0,0.3); }
+        .score-gauge::before { content: ''; position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(var(--gauge-color) calc(var(--value) * 1%), #444 0); mask: radial-gradient(transparent 65%, black 66%); -webkit-mask: radial-gradient(transparent 65%, black 66%); transition: background 0.5s ease-out; }
+        .score-gauge-value { font-family: 'Orbitron', sans-serif; font-size: 2.5rem; font-weight: 700; z-index: 1; }
+        .gauge-key-rhythm { --gauge-color: #3b82f6; }
+        .gauge-vibrato { --gauge-color: #22c55e; }
+        .gauge-upband { --gauge-color: #f59e0b; }
+        .gauge-downband { --gauge-color: #ef4444; }
     `,
       )
       .appendTo(wrapper);
@@ -879,66 +730,123 @@ const pkg = {
     const progressBar = new Html("div")
       .class("progress-bar")
       .appendTo(playerProgress);
+    const introCard = new Html("div").class("intro-card").appendTo(playerUi);
+    const introCardTitle = new Html("div")
+      .class("intro-card-title")
+      .appendTo(introCard);
+    const introCardArtist = new Html("div")
+      .class("intro-card-artist")
+      .appendTo(introCard);
 
-    const karaokeHud = new Html("div").class("karaoke-hud").appendTo(wrapper);
-    const reservationBox = new Html("div")
-      .class("hud-box")
-      .appendTo(karaokeHud);
-    new Html("div").class("hud-label").text("RESERVE").appendTo(reservationBox);
-    const reservationCodeEl = new Html("div")
-      .class("reservation-code")
-      .appendTo(reservationBox);
-    const upNextBox = new Html("div").class("hud-box").appendTo(karaokeHud);
-    new Html("div").class("hud-label").text("UP NEXT").appendTo(upNextBox);
-    const upNextTitleEl = new Html("div")
-      .class("up-next-title")
-      .appendTo(upNextBox);
-    const upNextArtistEl = new Html("div")
-      .class("up-next-artist")
-      .appendTo(upNextBox);
+    // --- SCORE ANIMATION HELPERS ---
+    function animateNumber(element, target, duration, isFloat = true) {
+      return new Promise((resolve) => {
+        let start = 0;
+        const currentText = element.text();
+        if (currentText && !isNaN(parseFloat(currentText))) {
+          start = parseFloat(currentText);
+        }
+        const startTime = performance.now();
+        const update = () => {
+          const elapsed = performance.now() - startTime;
+          const progress = Math.min(elapsed / duration, 1);
+          const currentValue = start + (target - start) * progress;
+          element.text(
+            isFloat ? currentValue.toFixed(2) : Math.round(currentValue),
+          );
+          if (progress < 1) {
+            requestAnimationFrame(update);
+          } else {
+            element.text(isFloat ? target.toFixed(2) : Math.round(target));
+            resolve();
+          }
+        };
+        requestAnimationFrame(update);
+      });
+    }
 
-    const postSongScoreScreen = new Html("div")
-      .class("post-song-score-screen")
+    function animateGauge(gaugeElements, target, duration) {
+      return new Promise((resolve) => {
+        const { gauge, valueDisplay } = gaugeElements;
+        let start = 0;
+        const startTime = performance.now();
+        const update = () => {
+          const elapsed = performance.now() - startTime;
+          const progress = Math.min(elapsed / duration, 1);
+          const currentValue = start + (target - start) * progress;
+          gauge.styleJs({ "--value": currentValue });
+          valueDisplay.text(`${Math.round(currentValue)}%`);
+          if (progress < 1) {
+            requestAnimationFrame(update);
+          } else {
+            gauge.styleJs({ "--value": target });
+            valueDisplay.text(`${Math.round(target)}%`);
+            resolve();
+          }
+        };
+        requestAnimationFrame(update);
+      });
+    }
+
+    async function showPostSongScreen(scoreData) {
+      // Reset initial state
+      finalScoreDisplay.text("0.00");
+      [keyRhythmGauge, vibratoGauge, upbandGauge, downbandGauge].forEach(
+        ({ gauge, valueDisplay }) => {
+          gauge.styleJs({ "--value": 0 });
+          valueDisplay.text("0%");
+        },
+      );
+
+      postSongScoreScreen.classOn("visible");
+      Forte.playSfx("/assets/audio/score_tally.wav");
+
+      // Animate final score first
+      await new Promise((r) => setTimeout(r, 500));
+      await animateNumber(finalScoreDisplay, scoreData.finalScore, 2000, true);
+
+      // Animate all four gauges simultaneously
+      await Promise.all([
+        animateGauge(keyRhythmGauge, scoreData.details.pitchAndRhythm, 1500),
+        animateGauge(vibratoGauge, scoreData.details.vibrato, 1500),
+        animateGauge(upbandGauge, scoreData.details.upband, 1500),
+        animateGauge(downbandGauge, scoreData.details.downband, 1500),
+      ]);
+
+      await new Promise((r) => setTimeout(r, 4000)); // Hold the final score on screen
+      postSongScoreScreen.classOff("visible");
+
+      // Wait for the fade-out animation to complete before resolving
+      await new Promise((r) => setTimeout(r, 500)); // Match the CSS transition duration
+    }
+
+    // --- NEW: CALIBRATION SCREEN ---
+    const calibrationScreen = new Html("div")
+      .styleJs({
+        position: "absolute",
+        inset: 0,
+        background: "rgba(0,0,0,0.9)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexDirection: "column",
+        color: "white",
+        fontFamily: "'Rajdhani', sans-serif",
+        zIndex: 999999,
+        opacity: 0,
+        transition: "opacity 0.5s ease",
+        pointerEvents: "none",
+      })
       .appendTo(wrapper);
-    new Html("div")
-      .class("score-title")
-      .text("YOUR SCORE")
-      .appendTo(postSongScoreScreen);
-    const finalScoreDisplay = new Html("div")
-      .class("final-score")
-      .appendTo(postSongScoreScreen);
 
-    const updateReservationUI = () => {
-      const placeholder = "-----";
-      const codeText = state.reservationNumber
-        ? state.reservationNumber.padEnd(maxLength, "-")
-        : placeholder;
-      reservationCodeEl.text(codeText);
-    };
-    const updateUpNextUI = () => {
-      if (state.reservationQueue.length === 0) {
-        upNextTitleEl.text("—");
-        upNextArtistEl.text("");
-        return;
-      }
-      const nextCode = state.reservationQueue[0];
-      const nextSong = songMap.get(nextCode);
-      const extra =
-        state.reservationQueue.length > 1
-          ? ` (+${state.reservationQueue.length - 1} more)`
-          : "";
-      if (nextSong) {
-        upNextTitleEl.text(nextSong.title);
-        upNextArtistEl.text(nextSong.artist + extra);
-      } else {
-        upNextTitleEl.text(`Song ${nextCode}`);
-        upNextArtistEl.text("Unknown Artist" + extra);
-      }
-    };
-    const updateHud = () => {
-      updateReservationUI();
-      updateUpNextUI();
-    };
+    new Html("h1")
+      .styleJs({ fontSize: "3rem", letterSpacing: "0.1em", color: "#89CFF0" })
+      .text("CALIBRATING AUDIO")
+      .appendTo(calibrationScreen);
+    new Html("p")
+      .styleJs({ fontSize: "1.5rem", opacity: 0.8 })
+      .text("Please be quiet...")
+      .appendTo(calibrationScreen);
 
     const setMode = (newMode) => {
       state.mode = newMode;
@@ -955,7 +863,7 @@ const pkg = {
         updateMenuUI();
       } else if (newMode === "player") {
         playerUi.classOff("hidden");
-        updateHud();
+        InfoBar.showDefault();
       } else if (newMode === "yt-search") {
         searchUi.classOff("hidden");
         searchInput.elm.focus();
@@ -965,15 +873,16 @@ const pkg = {
 
     const updateMenuUI = () => {
       let activeSong = null;
-      let displayCode = "".padStart(maxLength, "0");
+      let displayCode = state.songNumber.padStart(maxLength, "0");
+
       if (state.songNumber.length > 0) {
         state.highlightedIndex = -1;
-        displayCode = state.songNumber.padStart(maxLength, "0");
         activeSong = songMap.get(displayCode);
       } else if (state.highlightedIndex >= 0) {
         activeSong = songList[state.highlightedIndex];
         if (activeSong) displayCode = activeSong.code;
       }
+
       numberDisplay.text(displayCode);
       if (activeSong) {
         numberDisplay.classOn("active");
@@ -1106,6 +1015,8 @@ const pkg = {
       lyricsScroller.clear();
       midiLineDisplay1.clear();
       midiLineDisplay2.clear();
+      ScoreHUD.hide();
+      introCard.classOff("visible");
 
       state.currentSongIsYouTube = song.path.startsWith("yt://");
 
@@ -1132,7 +1043,9 @@ const pkg = {
         midiLyricsContainer.classOn("hidden");
         playerProgress.classOn("hidden");
       } else {
-        // If BGV was stopped (e.g., for a previous YT video), restart it.
+        lrcLyricsContainer.styleJs({ opacity: "0" });
+        midiLyricsContainer.styleJs({ opacity: "0" });
+
         if (
           BGVPlayer.videoElements.length > 0 &&
           !BGVPlayer.videoElements[0].hasAttribute("src")
@@ -1153,6 +1066,15 @@ const pkg = {
 
         const playbackState = Forte.getPlaybackState();
         state.currentSongIsMultiplexed = playbackState.isMultiplexed;
+
+        if (state.currentSongIsMultiplexed) {
+          ScoreHUD.show(0);
+        }
+
+        introCardTitle.text(song.title);
+        introCardArtist.text(song.artist);
+        introCard.classOn("visible");
+
         let lrcParsedLyrics = [],
           lrcLyricLines = [],
           currentLrcIndex = -1;
@@ -1160,8 +1082,7 @@ const pkg = {
         if (playbackState.isMidi) {
           midiLyricsContainer.styleJs({ display: "flex" });
           lrcLyricsContainer.styleJs({ display: "none" });
-          midiLineDisplay1.classOn("active").text(song.title);
-          midiLineDisplay2.text(song.artist);
+
           const allSyllables = [];
           const lines = [];
           let currentLineSyllables = [];
@@ -1186,44 +1107,59 @@ const pkg = {
             }
           });
           if (currentLineSyllables.length > 0) lines.push(currentLineSyllables);
-          let renderedLineIndex = -1;
-          let activeIndices = new Set();
+
+          const displayLines = [midiLineDisplay1, midiLineDisplay2];
+          let currentSongLineIndex = -1;
+
+          const renderLine = (displayEl, lineData) => {
+            displayEl.clear();
+            if (!lineData) return;
+            lineData.forEach((s) => {
+              const container = new Html("div")
+                .class("lyric-syllable-container")
+                .attr({ "data-index": s.globalIndex })
+                .appendTo(displayEl);
+              new Html("span")
+                .class("lyric-syllable-original")
+                .attr({ "data-text": s.text })
+                .text(s.text)
+                .appendTo(container);
+              if (s.romanized) {
+                new Html("span")
+                  .class("lyric-syllable-romanized")
+                  .attr({ "data-text": s.romanized })
+                  .text(s.romanized)
+                  .appendTo(container);
+              }
+            });
+          };
+
+          displayLines.forEach((line) =>
+            line.clear().classOff("active", "next"),
+          );
+          renderLine(displayLines[0], lines[0]);
+          renderLine(displayLines[1], lines[1]);
+          displayLines[0].classOn("active");
+          displayLines[1].classOn("next");
+
           lyricEventHandler = (e) => {
             const { index } = e.detail;
             if (index >= allSyllables.length) return;
+
             const activeSyllable = allSyllables[index];
-            const currentLineIndex = activeSyllable.lineIndex;
-            if (currentLineIndex !== renderedLineIndex) {
-              renderedLineIndex = currentLineIndex;
-              const currentLineData = lines[currentLineIndex];
-              const nextLineData = lines[currentLineIndex + 1];
-              const renderLine = (displayEl, lineData) => {
-                displayEl.clear();
-                if (!lineData) return;
-                lineData.forEach((s) => {
-                  const container = new Html("div")
-                    .class("lyric-syllable-container")
-                    .attr({ "data-index": s.globalIndex })
-                    .appendTo(displayEl);
-                  new Html("span")
-                    .class("lyric-syllable-original")
-                    .text(s.text)
-                    .appendTo(container);
-                  if (s.romanized) {
-                    new Html("span")
-                      .class("lyric-syllable-romanized")
-                      .text(s.romanized)
-                      .appendTo(container);
-                  }
-                  if (activeIndices.has(s.globalIndex)) {
-                    container.classOn("active");
-                  }
-                });
-              };
-              renderLine(midiLineDisplay1, currentLineData);
-              renderLine(midiLineDisplay2, nextLineData);
+            if (activeSyllable.lineIndex !== currentSongLineIndex) {
+              currentSongLineIndex = activeSyllable.lineIndex;
+
+              const activeDisplay = displayLines[currentSongLineIndex % 2];
+              const nextDisplay = displayLines[(currentSongLineIndex + 1) % 2];
+
+              activeDisplay.classOn("active").classOff("next");
+              nextDisplay.classOff("active").classOn("next");
+
+              const lineToRender = lines[currentSongLineIndex + 1];
+              renderLine(nextDisplay, lineToRender);
             }
-            activeIndices.add(index);
+
             const newSyllableEl = wrapper.qs(
               `.lyric-syllable-container[data-index="${index}"]`,
             );
@@ -1236,14 +1172,6 @@ const pkg = {
         } else if (song.lrcPath) {
           midiLyricsContainer.styleJs({ display: "none" });
           lrcLyricsContainer.styleJs({ display: "block" });
-          new Html("p")
-            .class("lyric-line", "lrc", "active")
-            .text(song.title)
-            .appendTo(lyricsScroller);
-          new Html("p")
-            .class("lyric-line", "lrc")
-            .text(song.artist)
-            .appendTo(lyricsScroller);
           const lrcText = await FsSvc.readFile(song.lrcPath);
           const timeRegex = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/;
           if (lrcText) {
@@ -1266,8 +1194,8 @@ const pkg = {
 
         if (state.currentSongIsMultiplexed) {
           scoreUpdateHandler = (e) => {
-            const { score } = e.detail;
-            ScoreOSD.show(score);
+            const scoreData = e.detail;
+            ScoreHUD.show(scoreData.finalScore);
           };
           document.addEventListener(
             "CherryTree.Forte.Scoring.Update",
@@ -1278,10 +1206,11 @@ const pkg = {
         const PRE_ROLL_DELAY_MS = 2500;
         setTimeout(() => {
           if (state.mode !== "player") return;
-          if (playbackState.isMidi) {
-            midiLineDisplay1.clear().classOff("active");
-            midiLineDisplay2.clear();
-          }
+
+          introCard.classOff("visible");
+          lrcLyricsContainer.styleJs({ opacity: "1" });
+          midiLyricsContainer.styleJs({ opacity: "1" });
+
           if (lrcParsedLyrics.length > 0) {
             lyricsScroller.clear();
             const topPadding = lrcLyricsContainer.elm.clientHeight / 2;
@@ -1352,6 +1281,7 @@ const pkg = {
     };
 
     const stopPlayer = () => {
+      introCard.classOff("visible");
       youtubePlayerContainer.classOn("hidden");
       youtubeIframe.attr({ src: "" });
       bgvContainer.classOff("hidden");
@@ -1374,40 +1304,37 @@ const pkg = {
           "CherryTree.Forte.Scoring.Update",
           scoreUpdateHandler,
         );
-      ScoreOSD.hide();
+      ScoreHUD.hide();
+      InfoBar.showDefault(); // Reset info bar
       timeUpdateHandler = null;
       lyricEventHandler = null;
       scoreUpdateHandler = null;
       lastPlaybackStatus = null;
       state.currentSongIsYouTube = false;
       state.currentSongIsMultiplexed = false;
+    };
 
-      // This function now only handles the transition back to the menu or next song
-      const transitionToNextState = () => {
-        if (state.reservationQueue.length > 0) {
-          const nextCode = state.reservationQueue.shift();
-          updateHud();
-          const nextSong = songMap.get(nextCode);
-          if (nextSong) {
-            setTimeout(() => startPlayer(nextSong), 120);
-          }
-          return;
+    const transitionAfterSong = () => {
+      if (state.reservationQueue.length > 0) {
+        const nextCode = state.reservationQueue.shift();
+        InfoBar.showDefault(); // Update to show next song (or lack thereof)
+        const nextSong = songMap.get(nextCode);
+        if (nextSong) {
+          setTimeout(() => startPlayer(nextSong), 250);
         }
-
+      } else {
         if (
           BGVPlayer.videoElements.length > 0 &&
           !BGVPlayer.videoElements[0].hasAttribute("src")
         ) {
           BGVPlayer.start();
         }
-
         setMode("menu");
         window.desktopIntegration.ipc.send("setRPC", {
           details: `Browsing ${songList.length} Songs...`,
           state: `Main Menu`,
         });
-      };
-      return transitionToNextState;
+      }
     };
 
     const handleSubmit = () => {
@@ -1426,13 +1353,18 @@ const pkg = {
     const handleDigitInput = (digit) => {
       const target =
         state.mode === "player" ? "reservationNumber" : "songNumber";
-      if (state[target].length < maxLength) {
-        state[target] += digit;
-        if (state.mode !== "player") {
-          Forte.playSfx(`/assets/audio/numbers/${digit}.wav`);
-        }
+
+      if (state[target].length >= maxLength) {
+        state[target] = digit; // Reset with the new digit
+      } else {
+        state[target] += digit; // Append
       }
-      if (state.mode === "player") updateReservationUI();
+
+      if (state.mode !== "player") {
+        Forte.playSfx(`/assets/audio/numbers/${digit}.wav`);
+      }
+
+      if (state.mode === "player") InfoBar.showReservation(state[target]);
       else updateMenuUI();
     };
 
@@ -1440,9 +1372,11 @@ const pkg = {
       if (state.mode === "player") {
         if (state.reservationNumber.length > 0) {
           state.reservationNumber = state.reservationNumber.slice(0, -1);
-          updateReservationUI();
-        } else {
-          stopPlayer()(); // Immediately call the returned transition function
+          if (state.reservationNumber.length > 0) {
+            InfoBar.showReservation(state.reservationNumber);
+          } else {
+            InfoBar.showDefault();
+          }
         }
       } else if (state.mode === "menu") {
         if (state.songNumber.length > 0) {
@@ -1466,7 +1400,7 @@ const pkg = {
           if (songMap.has(code)) {
             state.reservationQueue.push(code);
             state.reservationNumber = "";
-            updateHud();
+            InfoBar.showDefault();
           }
         }
       } else if (state.mode === "yt-search") {
@@ -1486,11 +1420,23 @@ const pkg = {
 
     const handleEscape = () => {
       if (state.mode === "player") {
+        if (state.isTransitioning) return;
+
         if (state.reservationNumber.length > 0) {
           state.reservationNumber = "";
-          updateReservationUI();
+          InfoBar.showDefault();
         } else {
-          stopPlayer()(); // Immediately call the returned transition function
+          if (state.currentSongIsYouTube) {
+            state.isTransitioning = true;
+            stopPlayer();
+            BGVPlayer.start();
+            transitionAfterSong();
+            setTimeout(() => {
+              state.isTransitioning = false;
+            }, 1000);
+          } else {
+            Forte.stopTrack(); // This will trigger the playbackUpdateHandler
+          }
         }
       } else if (state.mode === "yt-search") {
         setMode("menu");
@@ -1501,7 +1447,9 @@ const pkg = {
       const change = direction === "up" ? 0.05 : -0.05;
       state.volume = Math.max(0, Math.min(1, state.volume + change));
       Forte.setTrackVolume(state.volume);
-      VolumeOSD.show(state.volume);
+      InfoBar.show("VOLUME", `${Math.round(state.volume * 100)}%`, {
+        duration: 3000,
+      });
       const updatedConfig = {
         ...config,
         audioConfig: {
@@ -1528,7 +1476,8 @@ const pkg = {
         Math.min(24, currentTranspose + change),
       );
       Forte.setTranspose(newTranspose);
-      TransposeOSD.show(newTranspose);
+      const sign = newTranspose > 0 ? "+" : "";
+      InfoBar.show("TRANSPOSE", `${sign}${newTranspose}`, { duration: 3000 });
     };
 
     const handleMultiplexPan = (direction) => {
@@ -1543,7 +1492,19 @@ const pkg = {
       );
 
       Forte.setMultiplexPan(newPan);
-      MultiplexPanOSD.show(newPan);
+      let displayText = "";
+      if (newPan <= -0.99) {
+        displayText = "INSTRUMENTAL";
+      } else if (newPan >= 0.99) {
+        displayText = "VOCAL GUIDE";
+      } else if (newPan > -0.01 && newPan < 0.01) {
+        displayText = "BALANCED";
+      } else if (newPan < 0) {
+        displayText = `◀ ${Math.abs(Math.round(newPan * 100))}% INST`;
+      } else {
+        displayText = `VOC ${Math.round(newPan * 100)}% ▶`;
+      }
+      InfoBar.show("VOCAL BALANCE", displayText, { duration: 3000 });
     };
 
     const handleMenuNav = (direction) => {
@@ -1693,34 +1654,33 @@ const pkg = {
       }
     });
 
-    playbackUpdateHandler = (e) => {
+    playbackUpdateHandler = async (e) => {
+      if (state.isTransitioning) {
+        return;
+      }
+
       const { status } = e.detail || {};
       if (
         state.mode === "player" &&
         lastPlaybackStatus === "playing" &&
         status === "stopped"
       ) {
-        const wasMultiplexed = state.currentSongIsMultiplexed;
+        state.isTransitioning = true;
 
-        const processNextInQueue = () => {
-          postSongScoreScreen.classOff("visible"); // Ensure it's hidden
-          const transitionFn = stopPlayer();
-          transitionFn(); // This will either play the next song or go to the menu
-        };
+        const wasMultiplexed = state.currentSongIsMultiplexed;
+        ScoreHUD.hide();
 
         if (wasMultiplexed) {
-          const finalScore = Forte.getPlaybackState().score;
-          finalScoreDisplay.text(finalScore);
-          postSongScoreScreen.classOn("visible");
-          Forte.playSfx("/assets/audio/score_tally.wav");
-
-          setTimeout(() => {
-            processNextInQueue();
-          }, 5000); // Show score for 5 seconds
-        } else {
-          // If not a multiplexed song, proceed immediately
-          processNextInQueue();
+          const finalScoreData = Forte.getPlaybackState().score;
+          await showPostSongScreen(finalScoreData);
         }
+
+        stopPlayer();
+        transitionAfterSong();
+
+        setTimeout(() => {
+          state.isTransitioning = false;
+        }, 1500); // Increased delay to be safer
       }
       lastPlaybackStatus = status;
     };
@@ -1730,6 +1690,15 @@ const pkg = {
     );
 
     window.addEventListener("keydown", keydownHandler);
+
+    // --- APP INITIALIZATION SEQUENCE ---
+    wrapper.classOn("loading");
+    calibrationScreen.styleJs({ opacity: 1, pointerEvents: "all" });
+    await Forte.runLatencyTest();
+    calibrationScreen.styleJs({ opacity: 0 });
+    await new Promise((r) => setTimeout(r, 500)); // wait for fade out
+    calibrationScreen.cleanup();
+
     await BGVPlayer.init(bgvContainer);
     BGVPlayer.start();
 
