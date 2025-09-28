@@ -6,29 +6,305 @@ let wrapper, Ui, Pid, FsSvc, Forte;
 let keydownHandler = null;
 let timeUpdateHandler = null;
 let playbackUpdateHandler = null;
-let lyricEventHandler = null; // Listener for our custom lyric events
-let scoreUpdateHandler = null; // Listener for real-time score updates
+let lyricEventHandler = null;
+let scoreUpdateHandler = null;
 let lastPlaybackStatus = null;
 
 let songList;
 
 const config = await window.desktopIntegration.ipc.invoke("getConfig");
 
+// --- Recorder Module ---
+const Recorder = {
+  isRecording: false,
+  mediaRecorder: null,
+  recordedChunks: [],
+  canvas: null,
+  ctx: null,
+  animationFrameId: null,
+  forteSvc: null,
+  bgvPlayer: null,
+  currentSongInfo: null, // To store song title and artist
+  uiRefs: {
+    playerUi: null,
+    lrcLineDisplay1: null,
+    lrcLineDisplay2: null,
+    progressBar: null,
+    scoreDisplay: null,
+  },
+  outputResolution: { width: 1920, height: 1080 },
+
+  init(container, forteSvc, bgvPlayer, uiRefs) {
+    this.forteSvc = forteSvc;
+    this.bgvPlayer = bgvPlayer;
+    this.uiRefs = uiRefs;
+
+    this.canvas = new Html("canvas")
+      .attr({
+        width: this.outputResolution.width,
+        height: this.outputResolution.height,
+      })
+      .styleJs({ display: "none" })
+      .appendTo(container).elm;
+
+    this.ctx = this.canvas.getContext("2d");
+    console.log("[Recorder] Initialized successfully.");
+  },
+
+  setSongInfo(song) {
+    if (song) {
+      this.currentSongInfo = { title: song.title, artist: song.artist };
+    }
+  },
+
+  clearSongInfo() {
+    this.currentSongInfo = null;
+  },
+
+  toggle() {
+    if (this.isRecording) {
+      this.stop();
+    } else {
+      this.start();
+    }
+  },
+
+  start() {
+    if (this.isRecording || !this.forteSvc || !this.bgvPlayer) return;
+
+    const audioStream = this.forteSvc.getRecordingAudioStream();
+    if (!audioStream || audioStream.getAudioTracks().length === 0) {
+      console.error(
+        "[Recorder] Could not get a valid audio stream from Forte.",
+      );
+      InfoBar.showTemp("RECORDING", "Error: No audio stream found.", 4000);
+      return;
+    }
+
+    const videoStream = this.canvas.captureStream(30);
+    const combinedStream = new MediaStream([
+      videoStream.getVideoTracks()[0],
+      audioStream.getAudioTracks()[0],
+    ]);
+
+    this.recordedChunks = [];
+    try {
+      this.mediaRecorder = new MediaRecorder(combinedStream, {
+        mimeType: "video/webm; codecs=vp9,opus",
+        videoBitsPerSecond: 5000000,
+      });
+    } catch (e) {
+      console.error("Failed to create MediaRecorder:", e);
+      InfoBar.showTemp("RECORDING", "Error: Could not start recorder.", 4000);
+      return;
+    }
+
+    this.mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        this.recordedChunks.push(event.data);
+      }
+    };
+
+    this.mediaRecorder.onstop = () => {
+      const blob = new Blob(this.recordedChunks, { type: "video/webm" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      document.body.appendChild(a);
+      a.style = "display: none";
+      a.href = url;
+      a.download = `Encore-Recording-${new Date()
+        .toISOString()
+        .replace(/:/g, "-")}.webm`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+      InfoBar.showTemp(
+        "RECORDING",
+        "Recording saved to Downloads folder.",
+        5000,
+      );
+    };
+
+    this.mediaRecorder.start();
+    this.isRecording = true;
+    this.drawFrame();
+    InfoBar.showDefault();
+    console.log("[Recorder] Recording started.");
+  },
+
+  stop() {
+    if (!this.isRecording || !this.mediaRecorder) return;
+    this.mediaRecorder.stop();
+    this.isRecording = false;
+    if (this.animationFrameId) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+    InfoBar.showDefault();
+    console.log("[Recorder] Recording stopped.");
+  },
+
+  drawFrame() {
+    if (!this.isRecording) return;
+
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    this.ctx.clearRect(0, 0, w, h);
+
+    // --- 1. Draw Video Background ---
+    let sourceVideo = null;
+    if (this.bgvPlayer.isManualMode) {
+      sourceVideo = this.bgvPlayer.activeManualPlayer;
+    } else {
+      sourceVideo =
+        this.bgvPlayer.videoElements[this.bgvPlayer.activePlayerIndex];
+    }
+    if (sourceVideo && sourceVideo.readyState >= 2 && !sourceVideo.paused) {
+      this.ctx.drawImage(sourceVideo, 0, 0, w, h);
+    } else {
+      this.ctx.fillStyle = "black";
+      this.ctx.fillRect(0, 0, w, h);
+    }
+
+    // --- 2. Draw UI Overlays ---
+    if (!this.uiRefs.playerUi.elm.classList.contains("hidden")) {
+      const gradient = this.ctx.createLinearGradient(0, h * 0.5, 0, h);
+      gradient.addColorStop(0, "rgba(0,0,0,0)");
+      gradient.addColorStop(1, "rgba(0,0,0,0.9)");
+      this.ctx.fillStyle = gradient;
+      this.ctx.fillRect(0, h * 0.5, w, h * 0.5);
+
+      this.ctx.textAlign = "center";
+      this.ctx.textBaseline = "bottom";
+
+      // Base positions for lyrics
+      const line1BaseY = h - 180;
+      const line2BaseY = h - 90;
+
+      // Check if each line has romanized text
+      const line1HasRomanized = this.uiRefs.lrcLineDisplay1.elm.querySelector(
+        ".lyric-line-romanized",
+      )?.textContent;
+      const line2HasRomanized = this.uiRefs.lrcLineDisplay2.elm.querySelector(
+        ".lyric-line-romanized",
+      )?.textContent;
+
+      // Calculate Y positions with smarter overlap prevention
+      const line1Y = line1HasRomanized
+        ? line2HasRomanized
+          ? line1BaseY - 40
+          : line1BaseY - 20 // Push up more if both lines have romanized
+        : line1BaseY;
+      const line2Y = line2HasRomanized ? line2BaseY - 20 : line2BaseY;
+
+      this.drawLyricLine(this.uiRefs.lrcLineDisplay1.elm, line1Y);
+      this.drawLyricLine(this.uiRefs.lrcLineDisplay2.elm, line2Y);
+
+      const progressWidth = parseFloat(
+        this.uiRefs.progressBar.elm.style.width || "0%",
+      );
+      const barY = h - 60;
+      const barH = 10;
+      const barW = w * 0.8;
+      const barX = (w - barW) / 2;
+      this.ctx.fillStyle = "rgba(255, 255, 255, 0.2)";
+      this.ctx.fillRect(barX, barY, barW, barH);
+      this.ctx.fillStyle = "#89CFF0";
+      this.ctx.fillRect(barX, barY, barW * (progressWidth / 100), barH);
+
+      if (
+        this.uiRefs.scoreDisplay.elm.parentElement.classList.contains("visible")
+      ) {
+        this.ctx.font = "bold 2.5rem Rajdhani, sans-serif";
+        this.ctx.fillStyle = "#89CFF0";
+        this.ctx.textAlign = "right";
+        this.ctx.fillText(this.uiRefs.scoreDisplay.getText(), w - 50, h - 80);
+        this.ctx.font = "bold 1rem Rajdhani, sans-serif";
+        this.ctx.fillStyle = "#FFD700";
+        this.ctx.fillText("SCORE", w - 50 - 100, h - 85);
+      }
+    }
+
+    // --- Draw Song Info Overlay ---
+    if (this.currentSongInfo) {
+      const x = 50;
+      const y = 50;
+      const maxWidth = w * 0.4;
+      const padding = 25;
+
+      this.ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+      this.ctx.beginPath();
+      this.ctx.roundRect(
+        x - padding,
+        y - padding,
+        maxWidth + padding * 2,
+        120 + padding,
+        15,
+      );
+      this.ctx.fill();
+
+      this.ctx.font = "bold 48px Rajdhani, sans-serif";
+      this.ctx.fillStyle = "white";
+      this.ctx.textAlign = "left";
+      this.ctx.textBaseline = "top";
+      this.ctx.shadowColor = "black";
+      this.ctx.shadowBlur = 5;
+      this.ctx.fillText(this.currentSongInfo.title, x, y, maxWidth);
+
+      this.ctx.font = "32px Rajdhani, sans-serif";
+      this.ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+      this.ctx.fillText(this.currentSongInfo.artist, x, y + 65, maxWidth);
+
+      this.ctx.shadowBlur = 0;
+    }
+
+    this.animationFrameId = requestAnimationFrame(() => this.drawFrame());
+  },
+
+  drawLyricLine(element, y) {
+    const originalEl = element.querySelector(".lyric-line-original");
+    const romanizedEl = element.querySelector(".lyric-line-romanized");
+
+    if (!originalEl || !originalEl.textContent) return;
+
+    const isActive = element.classList.contains("active");
+    const defaultOpacity = element.classList.contains("next") ? 0.5 : 0.4;
+
+    this.ctx.font = "bold 4.5rem Rajdhani, sans-serif";
+    this.ctx.fillStyle = isActive
+      ? "#FFFFFF"
+      : `rgba(255, 255, 255, ${defaultOpacity})`;
+    if (isActive) {
+      this.ctx.strokeStyle = "#010141";
+      this.ctx.lineWidth = 12;
+      this.ctx.lineJoin = "round";
+      this.ctx.strokeText(originalEl.textContent, this.canvas.width / 2, y);
+    }
+    this.ctx.fillText(originalEl.textContent, this.canvas.width / 2, y);
+
+    if (romanizedEl && romanizedEl.textContent) {
+      this.ctx.font = "500 1.5rem Rajdhani, sans-serif";
+      this.ctx.fillStyle = isActive
+        ? "#FFFFFF"
+        : `rgba(255, 255, 255, ${defaultOpacity + 0.1})`;
+      this.ctx.fillText(romanizedEl.textContent, this.canvas.width / 2, y + 40);
+    }
+  },
+};
+
 // --- BGVPlayer Module ---
-// ... (This module is unchanged from previous version)
 const BGVPlayer = {
   videoElements: [],
   playlist: [],
   currentIndex: 0,
   activePlayerIndex: 0,
   bgvContainer: null,
-  FADE_DURATION: 1200, // ms
-  PRELOAD_DELAY: 500, // ms
-  categories: [], // Store available categories
-  selectedCategory: "Auto", // Default to Auto mode
-  isManualMode: false, // Flag for when an MV is playing
-  activeManualPlayer: null, // Holds the video element playing an MV
-
+  FADE_DURATION: 1200,
+  PRELOAD_DELAY: 500,
+  categories: [],
+  selectedCategory: "Auto",
+  isManualMode: false,
+  activeManualPlayer: null,
   async init(container) {
     this.bgvContainer = container;
     for (let i = 0; i < 2; i++) {
@@ -52,14 +328,12 @@ const BGVPlayer = {
           willChange: "opacity",
         })
         .appendTo(this.bgvContainer);
-
       const elm = videoEl.elm;
       elm.volume = 0;
       elm.addEventListener("volumechange", () => (elm.volume = 0));
       this.videoElements.push(elm);
     }
   },
-
   async loadManifestCategories() {
     const manifestUrl = "http://127.0.0.1:9864/assets/video/bgv/manifest.json";
     try {
@@ -68,22 +342,18 @@ const BGVPlayer = {
     } catch (error) {
       console.error("[BGV] Failed to load video manifest:", error);
       this.bgvContainer.text("Could not load background videos.");
-      this.categories = []; // Ensure it's an array on failure
+      this.categories = [];
     }
   },
-
   addDynamicCategory(category) {
     if (category && category.BGV_LIST && category.BGV_LIST.length > 0) {
       this.categories.push(category);
     }
   },
-
   async updatePlaylistForCategory() {
     const assetBaseUrl = "http://127.0.0.1:9864/assets/video/bgv/";
     this.playlist = [];
-
     let allVideos = [];
-
     if (this.selectedCategory === "Auto") {
       for (const cat of this.categories) {
         if (cat.isAbsolute) {
@@ -118,9 +388,7 @@ const BGVPlayer = {
         }
       }
     }
-
     this.playlist = allVideos;
-
     for (let i = this.playlist.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [this.playlist[i], this.playlist[j]] = [
@@ -128,16 +396,13 @@ const BGVPlayer = {
         this.playlist[i],
       ];
     }
-
     console.log(
       `[BGV] Loaded ${this.playlist.length} videos for category: ${this.selectedCategory}`,
     );
-
     await this.cleanStop();
     this.currentIndex = 0;
     this.start();
   },
-
   async cleanStop() {
     this.videoElements.forEach((vid) => {
       vid.onended = null;
@@ -151,7 +416,6 @@ const BGVPlayer = {
         vid === this.videoElements[this.activePlayerIndex] ? "1" : "0";
     });
   },
-
   cycleCategory(direction) {
     if (this.isManualMode) return;
     const allCategoryNames = [
@@ -165,7 +429,6 @@ const BGVPlayer = {
     this.selectedCategory = allCategoryNames[currentIndex];
     this.updatePlaylistForCategory();
   },
-
   start() {
     if (this.isManualMode || this.playlist.length === 0) return;
     const activePlayer = this.videoElements[this.activePlayerIndex];
@@ -177,12 +440,11 @@ const BGVPlayer = {
     activePlayer.onended = () => this.playNext();
     this.currentIndex = (this.currentIndex + 1) % this.playlist.length;
     setTimeout(() => {
-      if (this.isManualMode) return; // Don't preload if mode changed
+      if (this.isManualMode) return;
       preloadPlayer.src = this.playlist[this.currentIndex];
       preloadPlayer.load();
     }, this.PRELOAD_DELAY);
   },
-
   playNext() {
     if (this.isManualMode) return;
     const currentPlayer = this.videoElements[this.activePlayerIndex];
@@ -201,7 +463,6 @@ const BGVPlayer = {
       currentPlayer.load();
     }, this.FADE_DURATION + this.PRELOAD_DELAY);
   },
-
   async playSingleVideo(url) {
     this.isManualMode = true;
     await this.cleanStop();
@@ -212,28 +473,24 @@ const BGVPlayer = {
     this.activeManualPlayer = activePlayer;
     return activePlayer;
   },
-
   async resumePlaylist() {
     if (!this.isManualMode) return;
     this.isManualMode = false;
     this.activeManualPlayer = null;
     await this.updatePlaylistForCategory();
   },
-
   stop() {
     this.cleanStop().catch(console.error);
   },
 };
 
 // --- Romanizer Module ---
-// ... (This module is unchanged)
 const Romanizer = {
   getPlaceholder(text, placeholderChar) {
     return text.replace(/\S/g, placeholderChar);
   },
   async romanize(text) {
     if (!text || !text.trim()) return null;
-
     if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(text)) {
       try {
         const params = new URLSearchParams({ t: text });
@@ -251,11 +508,9 @@ const Romanizer = {
         return null;
       }
     }
-
     if (/[\uac00-\ud7af]/.test(text)) {
       return Aromanize.romanize(text);
     }
-
     return null;
   },
 };
@@ -266,13 +521,10 @@ const InfoBar = {
   labelEl: null,
   contentEl: null,
   timeout: null,
-  maxLength: 5,
   isTempVisible: false,
-  oldLabel: null,
-  oldContent: null,
+  persistentState: { label: "", content: "" },
 
-  init(container, maxLength) {
-    this.maxLength = maxLength;
+  init(container) {
     this.bar = new Html("div").class("info-bar").appendTo(container);
     this.labelEl = new Html("div").class("info-bar-label").appendTo(this.bar);
     this.contentEl = new Html("div")
@@ -280,63 +532,51 @@ const InfoBar = {
       .appendTo(this.bar);
   },
 
-  show(label, content, options = {}) {
-    if (this.timeout) clearTimeout(this.timeout);
-
-    if (options.duration) {
-      // If this is the first temporary message in a sequence, store the persistent state.
-      if (!this.isTempVisible) {
-        this.oldLabel = this.labelEl.getText();
-        this.oldContent = this.contentEl.getHtml();
-      }
-      this.isTempVisible = true;
-
-      this.labelEl.text(label);
-      this.contentEl.html(content);
-      this.bar.classOn("temp-visible");
-
-      this.timeout = setTimeout(() => {
-        this.isTempVisible = false;
-        this.timeout = null;
-        this.bar.classOff("temp-visible");
-
-        // After fade out, restore the old content.
-        setTimeout(() => {
-          // Only restore if another temp message hasn't appeared in the meantime
-          if (!this.isTempVisible) {
-            this.labelEl.text(this.oldLabel);
-            this.contentEl.html(this.oldContent);
-          }
-        }, 300); // Must match CSS transition duration
-      }, options.duration);
-    } else {
-      // This is a persistent message. Clear any temporary state.
-      this.isTempVisible = false;
-      this.oldLabel = null;
-      this.oldContent = null;
-
+  show(label, content) {
+    this.persistentState = { label, content };
+    if (!this.isTempVisible) {
       this.labelEl.text(label);
       this.contentEl.html(content);
     }
   },
 
+  showTemp(label, content, duration) {
+    if (this.timeout) clearTimeout(this.timeout);
+    this.isTempVisible = true;
+    this.labelEl.text(label);
+    this.contentEl.html(content);
+    this.bar.classOn("temp-visible");
+    this.timeout = setTimeout(() => {
+      this.isTempVisible = false;
+      this.timeout = null;
+      this.labelEl.text(this.persistentState.label);
+      this.contentEl.html(this.persistentState.content);
+      this.bar.classOff("temp-visible");
+    }, duration);
+  },
+
+  showBar() {
+    this.bar.classOn("persist-visible");
+  },
+  hideBar() {
+    this.bar.classOff("persist-visible");
+  },
+
   showDefault() {
+    if (Recorder.isRecording) {
+      this.show("RECORDING", "REC ●");
+      return;
+    }
     const { reservationQueue } = this.context();
     if (reservationQueue.length > 0) {
       const nextSong = reservationQueue[0];
       const extra =
         reservationQueue.length > 1 ? ` (+${reservationQueue.length - 1})` : "";
-
-      if (nextSong) {
-        const codeSpan = nextSong.code
-          ? `<span class="info-bar-code">${nextSong.code}</span>`
-          : `<span class="info-bar-code is-youtube">YT</span>`;
-
-        const content = `${codeSpan}
-                         <span class="info-bar-title">${nextSong.title}</span>
-                         <span class="info-bar-artist">- ${nextSong.artist}${extra}</span>`;
-        this.show("UP NEXT", content);
-      }
+      const codeSpan = nextSong.code
+        ? `<span class="info-bar-code">${nextSong.code}</span>`
+        : `<span class="info-bar-code is-youtube">YT</span>`;
+      const content = `${codeSpan} <span class="info-bar-title">${nextSong.title}</span> <span class="info-bar-artist">- ${nextSong.artist}${extra}</span>`;
+      this.show("UP NEXT", content);
     } else {
       this.show("UP NEXT", "—");
     }
@@ -344,19 +584,16 @@ const InfoBar = {
 
   showReservation(reservationNumber) {
     const { songMap } = this.context();
-    const displayCode = reservationNumber.padStart(this.maxLength, "0");
+    const displayCode = reservationNumber.padStart(5, "0");
     const song = songMap.get(displayCode);
     let songInfo = "";
-
     if (song) {
-      songInfo = `<span class="info-bar-title">${song.title}</span>
-                  <span class="info-bar-artist">- ${song.artist}</span>`;
-    } else if (reservationNumber.length === this.maxLength) {
+      songInfo = `<span class="info-bar-title">${song.title}</span><span class="info-bar-artist">- ${song.artist}</span>`;
+    } else if (reservationNumber.length === 5) {
       songInfo = `<span style="opacity: 0.5;">No song found.</span>`;
     }
-
     const content = `<span class="info-bar-code">${displayCode}</span> ${songInfo}`;
-    this.show("RESERVING", content);
+    this.showTemp("RESERVING", content, 3000);
   },
 
   context() {
@@ -365,11 +602,9 @@ const InfoBar = {
 };
 
 // --- ScoreHUD Module ---
-// ... (This module is unchanged)
 const ScoreHUD = {
   hud: null,
   scoreDisplay: null,
-
   init(container) {
     this.hud = new Html("div").class("score-hud").appendTo(container);
     new Html("div").class("score-hud-label").text("SCORE").appendTo(this.hud);
@@ -378,12 +613,10 @@ const ScoreHUD = {
       .appendTo(this.hud);
     this.hide();
   },
-
   show(score) {
     this.scoreDisplay.text(Math.floor(score));
     this.hud.classOn("visible");
   },
-
   hide() {
     this.hud.classOff("visible");
   },
@@ -521,10 +754,9 @@ const pkg = {
     const upbandGauge = createGauge("Upband", "gauge-upband");
     const downbandGauge = createGauge("Downband", "gauge-downband");
 
-    InfoBar.init(wrapper, maxLength);
+    InfoBar.init(wrapper);
     ScoreHUD.init(wrapper);
 
-    // --- REVISION: Create a persistent, reusable calibration screen ---
     const calibrationScreen = new Html("div")
       .class("calibration-screen")
       .appendTo(wrapper);
@@ -534,7 +766,6 @@ const pkg = {
     new Html("style")
       .text(
         `
-        /* ... (General styles are unchanged) ... */
         .loading * { opacity: 0 !important; }
         .bgv-container { position: absolute; inset: 0; background-color: #000; overflow: hidden; z-index: 1; }
         .youtube-player-container { position: absolute; inset: 0; z-index: 2; background: #000; }
@@ -557,86 +788,18 @@ const pkg = {
         .song-list-container { flex-grow: 1; overflow-y: auto; }
         .song-item { display: flex; padding: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); transition: background-color 0.2s; } .song-item.highlighted { background-color: #89CFF044; }
         .song-item-code { font-family: 'Rajdhani', sans-serif; font-weight: 700; width: 80px; color: #89CFF0; } .song-item-title { flex-grow: 1; } .song-item-artist { width: 30%; text-align: right; opacity: 0.7; }
-
-        /* REVISION: Final Polished Spotlight Search Styling */
-        .search-ui {
-            position: absolute;
-            display: flex;
-            z-index: 20000000;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.3s ease-out;
-            /* Base position for overlay to prevent flash */
-            top: calc(2rem + 50px + 1rem);
-            left: 0;
-            right: 0;
-            bottom: auto;
-            align-items: flex-start;
-            justify-content: center;
-        }
-        .mode-yt-search .search-ui,
-        .search-overlay-active .search-ui {
-            opacity: 1;
-            pointer-events: all;
-            z-index: 200000;
-        }
-
-        .mode-yt-search .search-ui {
-            /* Override to full screen */
-            inset: 0;
-            padding-top: 0;
-            background: rgba(0,0,0,0.6);
-            backdrop-filter: blur(10px);
-            align-items: center;
-            z-index: 2000000;
-        }
-        .mode-yt-search .search-window {
-            width: 90%;
-            max-width: 1200px;
-            height: 80vh;
-            background: rgba(10,10,20,0.8);
-            gap: 1.5rem;
-            padding: 1.5rem;
-        }
-        
-        .search-window {
-            border: 1px solid rgba(137, 207, 240, 0.4);
-            border-radius: 0.5rem;
-            display: flex;
-            flex-direction: column;
-            gap: 0;
-            transition: height 0.25s ease-in-out, box-shadow 0.25s ease-in-out;
-            overflow: hidden;
-            z-index: 2000000;
-        }
-        
-        .search-overlay-active .search-window {
-            background: rgba(10, 10, 20, 0.95);
-            width: 60vw;
-            max-width: 800px;
-            height: auto;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-        }
+        .search-ui { position: absolute; display: flex; z-index: 20000000; opacity: 0; pointer-events: none; transition: opacity 0.3s ease-out; top: calc(2rem + 50px + 1rem); left: 0; right: 0; bottom: auto; align-items: flex-start; justify-content: center; }
+        .mode-yt-search .search-ui, .search-overlay-active .search-ui { opacity: 1; pointer-events: all; z-index: 200000; }
+        .mode-yt-search .search-ui { inset: 0; padding-top: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(10px); align-items: center; z-index: 2000000; }
+        .mode-yt-search .search-window { width: 90%; max-width: 1200px; height: 80vh; background: rgba(10,10,20,0.8); gap: 1.5rem; padding: 1.5rem; }
+        .search-window { border: 1px solid rgba(137, 207, 240, 0.4); border-radius: 0.5rem; display: flex; flex-direction: column; gap: 0; transition: height 0.25s ease-in-out, box-shadow 0.25s ease-in-out; overflow: hidden; z-index: 2000000; }
+        .search-overlay-active .search-window { background: rgba(10, 10, 20, 0.95); width: 60vw; max-width: 800px; height: auto; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
         .search-overlay-active .search-input { padding: 1.2rem; }
-        .search-overlay-active .search-results-container {
-            max-height: 0;
-            overflow-y: auto;
-            transition: max-height 0.25s ease-in-out;
-            border-top: none;
-        }
-
-        .search-overlay-active .search-window.has-results {
-             box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-        }
-        .search-overlay-active .search-window.has-results .search-results-container {
-             max-height: 50vh;
-             border-top: 1px solid rgba(255,255,255,0.2);
-             padding: 1rem;
-        }
-
+        .search-overlay-active .search-results-container { max-height: 0; overflow-y: auto; transition: max-height 0.25s ease-in-out; border-top: none; }
+        .search-overlay-active .search-window.has-results { box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .search-overlay-active .search-window.has-results .search-results-container { max-height: 50vh; border-top: 1px solid rgba(255,255,255,0.2); padding: 1rem; }
         .search-input { font-family: 'Rajdhani', sans-serif; font-size: 2rem; background: rgba(0,0,0,0.4); border: 2px solid rgba(255,255,255,0.3); border-radius: 0.5rem; color: white; width: 100%; text-align: center; outline: none; transition: all 0.2s ease; flex-shrink: 0; }
         .search-input:focus { border-color: #89CFF0; box-shadow: 0 0 20px #89CFF066; }
-        
         .search-window:not(.has-results) .search-results-container { padding: 0; }
         .search-result-item { display: flex; align-items: center; gap: 1rem; padding: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); transition: background-color 0.2s; }
         .search-result-item:last-child { border-bottom: none; }
@@ -647,13 +810,8 @@ const pkg = {
         .search-info { display: flex; flex-direction: column; overflow: hidden; }
         .search-title { font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .search-channel { font-size: 0.9rem; opacity: 0.7; }
-        
         .player-ui { position: absolute; inset: 0; padding: 2rem; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; transition: background 0.3s ease-out; background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 50%); z-index: 15; padding-bottom: 5vh; }
-        .mode-player-youtube .player-ui {
-            background: transparent;
-        }
-
-        /* ... (rest of styles are unchanged) ... */
+        .mode-player-youtube .player-ui { background: transparent; }
         .player-bottom-section { width: 100%; max-width: 1200px; display: flex; flex-direction: column; align-items: center; gap: 1rem; }
         .countdown-display { width: 9rem; height: 9rem; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: radial-gradient(circle at 50% 120%, #f7b733, #fc4a1a); font-family: 'Rajdhani', sans-serif; font-weight: 900; font-size: 6rem; color: #000; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); box-shadow: inset 0 0 10px rgba(0,0,0,0.5), 0 5px 15px rgba(0,0,0,0.4); border: 4px solid #4d4d4d; opacity: 0; transform: scale(0.8); transition: opacity 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); pointer-events: none; line-height: 1; }
         .countdown-display.visible { opacity: 1; transform: scale(1); }
@@ -671,8 +829,7 @@ const pkg = {
         .lyric-syllable-container { display: inline-flex; flex-direction: column; align-items: center; margin: 0; }
         .lyric-syllable-original, .lyric-syllable-romanized { position: relative; color: rgba(255, 255, 255, 0.4); }
         .lyric-syllable-original::after, .lyric-syllable-romanized::after { content: attr(data-text); position: absolute; top: 0; left: 0; width: 0; color: #FFFFFF; text-shadow: none; -webkit-text-stroke: 5px #010141; text-stroke: 5px #010141; paint-order: stroke fill; overflow: hidden; transition: width 0.1s linear; }
-        .lyric-syllable-container.active .lyric-syllable-original::after,
-        .lyric-syllable-container.active .lyric-syllable-romanized::after { width: 100%; }
+        .lyric-syllable-container.active .lyric-syllable-original::after, .lyric-syllable-container.active .lyric-syllable-romanized::after { width: 100%; }
         .lyric-syllable-original { font-size: inherit; }
         .lyric-syllable-romanized { font-size: 1rem; margin-top: 0.25rem; line-height: 1; font-weight: 500; }
         .player-progress { width: 100%; max-width: 1200px; height: 10px; background: rgba(255,255,255,0.2); border-radius: 5px; margin-top: 1rem; }
@@ -685,7 +842,7 @@ const pkg = {
         .intro-card-title { font-size: 4rem; font-weight: 700; letter-spacing: 0.05em; line-height: 1.1; text-shadow: 2px 2px 8px rgba(0,0,0,0.5); }
         .intro-card-artist { font-size: 1.5rem; font-weight: 500; opacity: 0.8; border-top: 1px solid rgba(255,255,255,0.3); padding-top: 0.75rem; margin-top: 0.5rem; }
         .info-bar { position: absolute; top: 2rem; left: 3rem; right: 3rem; height: 50px; display: flex; align-items: stretch; background: rgba(0,0,0,0.7); border: 1px solid rgba(255,255,255,0.2); border-radius: 0.5rem; font-family: 'Rajdhani', sans-serif; color: white; z-index: 25; overflow: hidden; opacity: 0; transition: opacity 0.3s ease; pointer-events: none; }
-        .mode-player .info-bar, .info-bar.temp-visible { opacity: 1; pointer-events: auto; }
+        .info-bar.persist-visible, .info-bar.temp-visible { opacity: 1; pointer-events: auto; }
         .info-bar-label { flex: 0 0 160px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.3); font-size: 1.2rem; font-weight: 700; color: #FFD700; letter-spacing: 0.1rem; border-right: 1px solid rgba(255,255,255,0.2); }
         .info-bar-content { flex-grow: 1; display: flex; align-items: center; gap: 1rem; padding: 0 1.5rem; font-size: 1.6rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .info-bar-code { font-weight: 700; color: #89CFF0; letter-spacing: 0.1rem; }
@@ -722,7 +879,6 @@ const pkg = {
         .gauge-vibrato { --gauge-color: #22c55e; }
         .gauge-upband { --gauge-color: #f59e0b; }
         .gauge-downband { --gauge-color: #ef4444; }
-        /* --- REVISION: Added styles for new calibration screen --- */
         .calibration-screen { position: absolute; inset: 0; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; flex-direction: column; color: white; font-family: 'Rajdhani', sans-serif; z-index: 999999; opacity: 0; transition: opacity 0.5s ease; pointer-events: none; text-align: center; padding: 2rem; }
         .calibration-screen.visible { opacity: 1; pointer-events: all; }
         .calibration-screen h1 { font-size: 3rem; letter-spacing: 0.1em; color: #89CFF0; margin-bottom: 1rem; }
@@ -731,7 +887,6 @@ const pkg = {
       )
       .appendTo(wrapper);
 
-    // ... (UI element creation is unchanged) ...
     wrapper.classOn("loading");
     const leftPanel = new Html("div").class("left-panel").appendTo(overlay);
     const rightPanel = new Html("div").class("right-panel").appendTo(overlay);
@@ -837,8 +992,6 @@ const pkg = {
       .class("progress-bar")
       .appendTo(playerProgress);
 
-    // ... (Functions from here down are updated)
-    // ... (animateNumber, animateGauge, showPostSongScreen are unchanged)
     let countdownTimers = [];
     let nextLineUpdateTimeout = null;
 
@@ -892,6 +1045,7 @@ const pkg = {
     }
 
     async function showPostSongScreen(scoreData) {
+      Forte.togglePianoRollVisibility(false);
       state.isTransitioning = true;
       finalScoreDisplay.text("0.00");
       [keyRhythmGauge, vibratoGauge, upbandGauge, downbandGauge].forEach(
@@ -916,21 +1070,16 @@ const pkg = {
       state.isTransitioning = false;
     }
 
-    // --- REVISION: New function to manage the calibration UI flow ---
     async function runCalibrationSequence() {
       if (state.isTransitioning) return;
       state.isTransitioning = true;
-
       calibrationTitle.text("LATENCY COMPENSATION");
       calibrationText.html(
         "Please place your microphone near your speakers and ensure the room is quiet.<br>The test will begin in five (5) seconds...",
       );
       calibrationScreen.classOn("visible");
-
-      await new Promise((r) => setTimeout(r, 5000)); // Give user time to prepare
-
+      await new Promise((r) => setTimeout(r, 5000));
       calibrationText.text("Calibrating... A series of beeps will play.");
-
       try {
         const latencyS = await Forte.runLatencyTest();
         const latencyMs = (latencyS * 1000).toFixed(0);
@@ -940,21 +1089,20 @@ const pkg = {
         window.desktopIntegration.ipc.send("updateConfig", updatedConfig);
         calibrationTitle.text("CALIBRATION COMPLETE");
         calibrationText.text(`Measured audio latency is ${latencyMs} ms.`);
-        InfoBar.show("CALIBRATION", `Success! Latency: ${latencyMs} ms`, {
-          duration: 5000,
-        });
+        InfoBar.showTemp(
+          "CALIBRATION",
+          `Success! Latency: ${latencyMs} ms`,
+          5000,
+        );
       } catch (e) {
         console.error("[Encore] Calibration failed:", e);
         calibrationTitle.text("CALIBRATION FAILED");
         calibrationText.html(
           `Could not get a reliable measurement.<br>Please check your microphone input, speaker volume, and reduce background noise.`,
         );
-        InfoBar.show("CALIBRATION", "Failed. Please try again.", {
-          duration: 5000,
-        });
+        InfoBar.showTemp("CALIBRATION", "Failed. Please try again.", 5000);
       }
-
-      await new Promise((r) => setTimeout(r, 6000)); // Show results for 6 seconds
+      await new Promise((r) => setTimeout(r, 6000));
       calibrationScreen.classOff("visible");
       state.isTransitioning = false;
     }
@@ -973,7 +1121,6 @@ const pkg = {
         wrapper.classOff("search-overlay-active");
         searchWindow.classOff("has-results");
         searchInput.elm.blur();
-
         setTimeout(() => {
           if (state.isSearchOverlayVisible) return;
           searchInput.val("");
@@ -981,13 +1128,8 @@ const pkg = {
           state.highlightedSearchIndex = -1;
           searchResultsContainer.clear();
         }, 300);
-
         if (state.mode === "player") {
-          if (state.reservationNumber.length > 0) {
-            InfoBar.showReservation(state.reservationNumber);
-          } else {
-            InfoBar.showDefault();
-          }
+          InfoBar.showDefault();
         }
       }
     };
@@ -1010,17 +1152,17 @@ const pkg = {
       if (newMode === "menu") {
         overlay.classOff("hidden");
         searchInput.elm.blur();
+        InfoBar.hideBar();
         updateMenuUI();
       } else if (newMode === "player") {
-        if (state.currentSongIsMultiplexed) {
+        if (state.currentSongIsMultiplexed)
           Forte.togglePianoRollVisibility(true);
-        }
         playerUi.classOff("hidden");
         InfoBar.showDefault();
+        InfoBar.showBar();
       } else if (newMode === "yt-search") {
-        if (state.currentSongIsMultiplexed) {
+        if (state.currentSongIsMultiplexed)
           Forte.togglePianoRollVisibility(false);
-        }
         searchInput.elm.focus();
         searchInput.elm.select();
       }
@@ -1029,7 +1171,6 @@ const pkg = {
     const renderSearchResults = () => {
       searchResultsContainer.clear();
       state.highlightedSearchIndex = -1;
-
       if (state.isSearching) {
         searchResultsContainer.text("Searching...");
         searchWindow.classOff("has-results");
@@ -1040,7 +1181,6 @@ const pkg = {
         searchWindow.classOff("has-results");
         return;
       }
-
       searchWindow.classOn("has-results");
       state.searchResults.forEach((result) => {
         const item = new Html("div")
@@ -1150,6 +1290,7 @@ const pkg = {
 
     const startPlayer = async (song) => {
       state.isTransitioning = true;
+      Recorder.setSongInfo(song);
       if (nextLineUpdateTimeout) clearTimeout(nextLineUpdateTimeout);
       countdownTimers.forEach(clearTimeout);
       nextLineUpdateTimeout = null;
@@ -1182,12 +1323,10 @@ const pkg = {
       state.currentSongIsYouTube = song.path.startsWith("yt://");
       state.currentSongIsMV = !!song.videoPath;
       state.reservationNumber = "";
-
       setMode("player");
       if (state.currentSongIsYouTube) {
         wrapper.classOn("mode-player-youtube");
       }
-
       window.desktopIntegration.ipc.send("setRPC", {
         details: song.title,
         state: song.artist,
@@ -1231,6 +1370,7 @@ const pkg = {
         state.currentSongIsMultiplexed = playbackState.isMultiplexed;
         if (state.currentSongIsMultiplexed) {
           ScoreHUD.show(0);
+          Forte.togglePianoRollVisibility(true);
         }
         introCardTitle.text(song.title);
         introCardArtist.text(song.artist);
@@ -1496,6 +1636,7 @@ const pkg = {
     };
 
     const stopPlayer = () => {
+      Recorder.clearSongInfo();
       introCard.classOff("visible");
       youtubePlayerContainer.classOn("hidden");
       youtubeIframe.attr({ src: "" });
@@ -1522,7 +1663,6 @@ const pkg = {
           scoreUpdateHandler,
         );
       ScoreHUD.hide();
-      InfoBar.showDefault();
       timeUpdateHandler = null;
       lyricEventHandler = null;
       scoreUpdateHandler = null;
@@ -1562,16 +1702,13 @@ const pkg = {
     };
 
     const handleDigitInput = (digit) => {
-      // REVISION: Corrected logic for targeting reservation number
       const target =
         state.mode === "player" ? "reservationNumber" : "songNumber";
       state[target] =
         state[target].length >= maxLength ? digit : state[target] + digit;
-
       if (state.mode !== "player") {
         Forte.playSfx(`/assets/audio/numbers/${digit}.wav`);
       }
-
       if (state.mode === "player") {
         InfoBar.showReservation(state[target]);
       } else {
@@ -1607,7 +1744,6 @@ const pkg = {
     const handleEnter = () => {
       if (state.mode === "menu") {
         if (state.reservationQueue.length > 0) {
-          // If we have queued songs in menu mode, start playing them
           const nextSong = state.reservationQueue.shift();
           startPlayer(nextSong);
         } else {
@@ -1624,10 +1760,10 @@ const pkg = {
                 path: `yt://${video.id}`,
               };
               state.reservationQueue.push(songToReserve);
-              InfoBar.show(
+              InfoBar.showTemp(
                 "RESERVED",
                 `<span class="info-bar-code is-youtube">YT</span> ${songToReserve.title}`,
-                { duration: 4000 },
+                4000,
               );
               toggleSearchOverlay(false);
             }
@@ -1660,12 +1796,10 @@ const pkg = {
 
     const handleEscape = () => {
       if (state.isTransitioning) return;
-
       if (state.isSearchOverlayVisible) {
         toggleSearchOverlay(false);
         return;
       }
-
       if (state.mode === "player" || state.mode === "mode-player-youtube") {
         if (state.reservationNumber.length > 0) {
           state.reservationNumber = "";
@@ -1688,18 +1822,9 @@ const pkg = {
       const change = direction === "up" ? 0.05 : -0.05;
       state.volume = Math.max(0, Math.min(1, state.volume + change));
       Forte.setTrackVolume(state.volume);
-
       const volumePercent = Math.round(state.volume * 100);
-      const volumeContent = `
-        <div class="volume-display">
-            <div class="volume-slider-container">
-                <div class="volume-slider-fill" style="width: ${volumePercent}%"></div>
-            </div>
-            <span class="volume-percentage">${volumePercent}%</span>
-        </div>
-      `;
-      InfoBar.show("VOLUME", volumeContent, { duration: 3000 });
-
+      const volumeContent = `<div class="volume-display"><div class="volume-slider-container"><div class="volume-slider-fill" style="width: ${volumePercent}%"></div></div><span class="volume-percentage">${volumePercent}%</span></div>`;
+      InfoBar.showTemp("VOLUME", volumeContent, 3000);
       const updatedConfig = {
         ...config,
         audioConfig: {
@@ -1725,20 +1850,20 @@ const pkg = {
         Math.min(24, (playbackState.transpose || 0) + change),
       );
       Forte.setTranspose(newTranspose);
-      InfoBar.show(
+      InfoBar.showTemp(
         "TRANSPOSE",
         `${newTranspose > 0 ? "+" : ""}${newTranspose}`,
-        { duration: 3000 },
+        3000,
       );
     };
 
     const handleVideoSync = (direction) => {
       if (state.mode !== "player" || !state.currentSongIsMV) return;
       state.videoSyncOffset += direction === "up" ? 10 : -10;
-      InfoBar.show(
+      InfoBar.showTemp(
         "VIDEO SYNC",
         `${state.videoSyncOffset > 0 ? "+" : ""}${state.videoSyncOffset} ms`,
-        { duration: 3000 },
+        3000,
       );
       const updatedConfig = JSON.parse(JSON.stringify(config));
       if (!updatedConfig.videoConfig) updatedConfig.videoConfig = {};
@@ -1762,7 +1887,7 @@ const pkg = {
       else if (newPan < 0)
         displayText = `◀ ${Math.abs(Math.round(newPan * 100))}% INST`;
       else if (newPan > 0) displayText = `VOC ${Math.round(newPan * 100)}% ▶`;
-      InfoBar.show("VOCAL BALANCE", displayText, { duration: 3000 });
+      InfoBar.showTemp("VOCAL BALANCE", displayText, 3000);
     };
 
     const handleMenuNav = (direction) => {
@@ -1807,10 +1932,8 @@ const pkg = {
       updateSearchHighlight();
     };
 
-    // REVISION: Final robust keydown handler with backspace fix
     keydownHandler = (e) => {
       const isSearchInputFocused = document.activeElement === searchInput.elm;
-
       if (isSearchInputFocused) {
         if (e.key === "Backspace" && searchInput.getValue().length === 0) {
           e.preventDefault();
@@ -1820,14 +1943,17 @@ const pkg = {
         if (["ArrowUp", "ArrowDown", "Enter", "Escape"].includes(e.key)) {
           e.preventDefault();
         } else {
-          return; // Allow all other keys (including Backspace with text) to type
+          return;
         }
       } else {
-        // Not focused, prevent default for all our commands
         e.preventDefault();
       }
-
-      // Command handling logic
+      if (e.key.toLowerCase() === "r") {
+        if (state.mode === "player" && !state.currentSongIsYouTube) {
+          Recorder.toggle();
+        }
+        return;
+      }
       if (e.key >= "0" && e.key <= "9") handleDigitInput(e.key);
       else if (e.key === "Backspace") handleBackspace();
       else if (e.key === "Enter") handleEnter();
@@ -1864,7 +1990,7 @@ const pkg = {
                 : `<span class="bgv-category-item">${cat}</span>`,
             )
             .join("");
-          InfoBar.show("BGV", content, { duration: 3000 });
+          InfoBar.showTemp("BGV", content, 3000);
         }
       } else if (e.key.toLowerCase() === "y") {
         if (state.isTransitioning) return;
@@ -1879,13 +2005,10 @@ const pkg = {
     };
 
     socket.on("connect", () => console.log("[LINK] Connected to server."));
-
     const validateAndReserveSong = (code) => {
       const displayCode = code.padStart(maxLength, "0");
       const song = songMap.get(displayCode);
-
       if (song) {
-        // If we're in menu mode and nothing is playing, start this song immediately
         if (state.mode === "menu") {
           startPlayer(song);
         } else {
@@ -1894,14 +2017,10 @@ const pkg = {
         }
         return { success: true, song };
       }
-
       return { success: false };
     };
-
     socket.on("execute-command", (commandObj) => {
       let data = commandObj.data;
-      console.log("[LINK] Executing command:", data);
-      console.log("[LINK] From socket id:", commandObj.identity);
       switch (data.type) {
         case "digit":
           handleDigitInput(data.value);
@@ -1933,6 +2052,28 @@ const pkg = {
           break;
         case "pan_right":
           handleMultiplexPan("right");
+          break;
+        case "toggle_recording":
+          if (state.mode === "player" && !state.currentSongIsYouTube) {
+            Recorder.toggle();
+          }
+          break;
+        case "toggle_bgv":
+          if (!state.currentSongIsMV) {
+            BGVPlayer.cycleCategory(1);
+            const allCategoryNames = [
+              "Auto",
+              ...BGVPlayer.categories.map((c) => c.BGV_CATEGORY),
+            ];
+            const content = allCategoryNames
+              .map((cat) =>
+                cat === BGVPlayer.selectedCategory
+                  ? `<span class="bgv-category-item selected">${cat}</span>`
+                  : `<span class="bgv-category-item">${cat}</span>`,
+              )
+              .join("");
+            InfoBar.showTemp("BGV", content, 3000);
+          }
           break;
         case "yt_search_open":
           if (!state.isTransitioning) {
@@ -1989,7 +2130,10 @@ const pkg = {
       ) {
         if (state.isTransitioning) return;
         state.isTransitioning = true;
-
+        Forte.togglePianoRollVisibility(false);
+        if (Recorder.isRecording) {
+          Recorder.stop();
+        }
         const wasMultiplexed = state.currentSongIsMultiplexed;
         const wasMV = state.currentSongIsMV;
         ScoreHUD.hide();
@@ -2001,7 +2145,6 @@ const pkg = {
           const finalScoreData = Forte.getPlaybackState().score;
           await showPostSongScreen(finalScoreData);
         }
-
         transitionAfterSong();
         setTimeout(() => {
           if (state.reservationQueue.length === 0)
@@ -2018,13 +2161,22 @@ const pkg = {
     window.addEventListener("keydown", keydownHandler);
 
     wrapper.classOn("loading");
-    // await new Promise((r) => setTimeout(r, 500));
     document.dispatchEvent(
       new CustomEvent("CherryTree.Loading.SetText", {
         detail: "Loading BGVs...",
       }),
     );
+
     await BGVPlayer.init(bgvContainer);
+
+    Recorder.init(wrapper, Forte, BGVPlayer, {
+      playerUi: playerUi,
+      lrcLineDisplay1: lrcLineDisplay1,
+      lrcLineDisplay2: lrcLineDisplay2,
+      progressBar: progressBar,
+      scoreDisplay: ScoreHUD.scoreDisplay,
+    });
+
     await BGVPlayer.loadManifestCategories();
     const mtvPaths = songList
       .filter((song) => song.videoPath)
@@ -2074,6 +2226,9 @@ const pkg = {
     lyricEventHandler = null;
     scoreUpdateHandler = null;
     lastPlaybackStatus = null;
+    if (Recorder.isRecording) {
+      Recorder.stop();
+    }
     BGVPlayer.stop();
     Forte.stopTrack();
     Ui.cleanup(Pid);

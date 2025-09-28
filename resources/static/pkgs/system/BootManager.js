@@ -79,7 +79,7 @@ const pkg = {
         easing: "easeInOutExpo",
         complete: () => {
           wrapper.cleanup();
-          doEverythingElse();
+          checkServicesLoaded();
         },
         begin: () => {
           startupSound.volume = 1;
@@ -109,6 +109,21 @@ const pkg = {
     await Root.Core.pkg.run("services:UiLib", [], true);
     await Root.Core.pkg.run("services:Forte", [], true);
     await Root.Core.pkg.run("services:FsSvc", [], true);
+
+    async function checkServicesLoaded() {
+      let curInterval = setInterval(() => {
+        try {
+          let SfxLib = Root.Processes.getService("SfxLib").data;
+          let UiLib = Root.Processes.getService("UiLib").data;
+          let FsSvc = Root.Processes.getService("FsSvc").data;
+          let Forte = Root.Processes.getService("ForteSvc").data;
+          clearInterval(curInterval);
+          doEverythingElse();
+        } catch (e) {
+          console.log("One or more services are not loaded, waiting...", e);
+        }
+      }, 50);
+    }
 
     async function doEverythingElse() {
       let tvName = "Encore Karaoke";

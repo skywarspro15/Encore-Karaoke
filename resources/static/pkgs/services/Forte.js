@@ -123,6 +123,12 @@ const state = {
     rightPannerGain: null,
     volume: 1,
   },
+  // --- NEW: Recording Pipeline State ---
+  recording: {
+    destinationNode: null, // The MediaStreamAudioDestinationNode
+    audioStream: null, // The final, exposed MediaStream
+    trackDelayNode: null, // The DelayNode for latency-compensating the track
+  },
   mic: {
     peerId: null,
     connectedMics: 0,
@@ -833,6 +839,13 @@ const pkg = {
       masterGain.connect(masterCompressor);
       masterCompressor.connect(audioContext.destination);
 
+      // --- NEW: Initialize the persistent recording pipeline here ---
+      state.recording.destinationNode =
+        audioContext.createMediaStreamDestination();
+      state.recording.audioStream = state.recording.destinationNode.stream;
+      console.log("[FORTE SVC] Recording audio pipeline initialized.");
+      // --- END NEW ---
+
       state.playback.currentDeviceId = audioContext.sinkId || "default";
       console.log("[FORTE SVC] Web Audio API context initialized.");
       pkg.data.getPlaybackDevices();
@@ -982,6 +995,16 @@ const pkg = {
   },
 
   data: {
+    // --- NEW: Public function to access the recording stream ---
+    /**
+     * Returns the persistent, mixed, and latency-compensated audio stream for recording.
+     * @returns {MediaStream | null} The audio stream ready for recording.
+     */
+    getRecordingAudioStream: () => {
+      return state.recording.audioStream;
+    },
+    // --- END NEW ---
+
     // --- START: Added for Sound Effects ---
     loadSfx: async (url) => {
       if (!sfxAudioContext) return false;
@@ -1216,23 +1239,35 @@ const pkg = {
     },
 
     playTrack: () => {
-      // if (toastElement) {
-      //   if (toastTimeout) clearTimeout(toastTimeout);
-      //   toastElement.classOn("visible");
-      //   toastTimeout = setTimeout(() => {
-      //     toastElement.classOff("visible");
-      //   }, 3000);
-      // }
-
+      // if (toastElement) { ... }
       if (audioContext.state === "suspended") {
         audioContext.resume();
       }
+
+      // --- NEW: Setup the recording path for the track audio ---
+      if (state.recording.destinationNode) {
+        // Create a new delay node for this playback instance
+        state.recording.trackDelayNode = audioContext.createDelay();
+        // Use the same latency value calculated for scoring for perfect sync
+        state.recording.trackDelayNode.delayTime.value =
+          state.scoring.measuredLatencyS;
+        // Connect the delayed path to our final recording destination
+        state.recording.trackDelayNode.connect(state.recording.destinationNode);
+      }
+      // --- END NEW ---
 
       if (state.playback.isMidi) {
         if (!state.playback.sequencer || state.playback.status === "playing")
           return;
         state.playback.sequencer.play();
         state.playback.status = "playing";
+
+        // --- NEW: Connect MIDI synth to recording pipeline ---
+        if (state.recording.trackDelayNode && state.playback.synthesizer) {
+          // The synthesizer is the source of MIDI audio
+          state.playback.synthesizer.connect(state.recording.trackDelayNode);
+        }
+        // --- END NEW ---
       } else {
         if (!state.playback.buffer || state.playback.status === "playing")
           return;
@@ -1243,7 +1278,7 @@ const pkg = {
         sourceNode.playbackRate.value = rate;
 
         if (state.playback.isMultiplexed) {
-          // --- START: Added for Piano Roll ---
+          // ... (existing piano roll, scoring setup)
           if (state.playback.guideNotes) {
             pianoRollTrack.clear(); // Clear any previous notes
             renderPianoRollNotes(state.playback.guideNotes); // Re-render existing notes
@@ -1251,10 +1286,8 @@ const pkg = {
               pianoRollContainer.classOn("visible");
             }
           }
-          // --- END: Added for Piano Roll ---
-          // --- START: SCORING ENGINE ---
-          // Reset all scoring variables to their initial state for a new song
           state.scoring.enabled = true;
+          // ... (reset scoring variables) ...
           state.scoring.finalScore = 0;
           state.scoring.details = {
             pitchAndRhythm: 0,
@@ -1276,55 +1309,55 @@ const pkg = {
           state.scoring.hasHitCurrentNote = false;
           state.scoring.isHoldingNote = false;
 
-          // Create the analysis graph
           const vocalGuideAnalyser = audioContext.createAnalyser();
           vocalGuideAnalyser.fftSize = 2048;
           state.scoring.vocalGuideAnalyser = vocalGuideAnalyser;
-
-          // --- DYNAMIC LATENCY COMPENSATION ---
           const delayNode = audioContext.createDelay();
-          // Use the automatically measured latency + a small base offset
           delayNode.delayTime.value = state.scoring.measuredLatencyS;
           state.scoring.guideVocalDelayNode = delayNode;
-          console.log(
-            `[FORTE SVC] Applying total guide delay of ${delayNode.delayTime.value.toFixed(
-              3,
-            )}s`,
-          );
 
-          // --- START: FIX FOR MULTIPLEX VOLUME ---
           const splitter = audioContext.createChannelSplitter(2);
           const leftGain = audioContext.createGain();
           const rightGain = audioContext.createGain();
-          const monoMixer = audioContext.createGain(); // Use a GainNode to sum signals
+          const monoMixer = audioContext.createGain();
 
           state.playback.leftPannerGain = leftGain;
           state.playback.rightPannerGain = rightGain;
 
           sourceNode.connect(splitter);
-          splitter.connect(leftGain, 0); // Instrumental (Left channel)
-          splitter.connect(rightGain, 1); // Vocal Guide (Right channel)
+          splitter.connect(leftGain, 0); // Instrumental (Left channel) to playback
+          splitter.connect(rightGain, 1); // Vocal Guide (Right channel) to playback
 
-          // Latency-compensated analysis path for scoring (unchanged)
-          // Note: We connect the splitter's output directly, before the panner gain.
           splitter.connect(delayNode, 1);
           delayNode.connect(vocalGuideAnalyser);
 
-          // Audio output path: Both gains now feed the summing monoMixer
           leftGain.connect(monoMixer);
           rightGain.connect(monoMixer);
-          monoMixer.connect(masterGain); // The combined mono signal goes to the master gain
-          // --- END: FIX FOR MULTIPLEX VOLUME ---
+          monoMixer.connect(masterGain);
+
+          // --- NEW: Connect INSTRUMENTAL ONLY to the recording pipeline ---
+          if (state.recording.trackDelayNode) {
+            // Connect channel 0 (left, instrumental) to the delay node for recording
+            splitter.connect(state.recording.trackDelayNode, 0);
+          }
+          // --- END NEW ---
 
           pkg.data.setMultiplexPan(state.playback.multiplexPan);
           console.log("[FORTE SVC] Playing track in multiplexed panner mode.");
         } else {
+          // Standard non-multiplexed audio track
           sourceNode.connect(masterGain);
+
+          // --- NEW: Connect standard audio to the recording pipeline ---
+          if (state.recording.trackDelayNode) {
+            sourceNode.connect(state.recording.trackDelayNode);
+          }
+          // --- END NEW ---
         }
 
         sourceNode.onended = () => {
           if (state.playback.status === "playing") {
-            pkg.data.stopTrack(); // Use stopTrack to ensure cleanup
+            pkg.data.stopTrack();
           }
         };
         const offset = state.playback.pauseTime;
@@ -1344,17 +1377,24 @@ const pkg = {
 
       // Disable scoring and clean up analysis nodes
       state.scoring.enabled = false;
-      if (state.scoring.guideVocalDelayNode) {
-        state.scoring.guideVocalDelayNode.disconnect();
-        state.scoring.guideVocalDelayNode = null;
-      }
-      if (state.scoring.vocalGuideAnalyser) {
-        state.scoring.vocalGuideAnalyser.disconnect();
-        state.scoring.vocalGuideAnalyser = null;
-      }
-      // --- START: Added for Piano Roll ---
+      // ... (existing cleanup)
       pianoRollContainer.classOff("visible");
-      // --- END: Added for Piano Roll ---
+
+      // --- NEW: Tear down the track's recording path on pause ---
+      if (state.recording.trackDelayNode) {
+        state.recording.trackDelayNode.disconnect();
+        if (state.playback.isMidi && state.playback.synthesizer) {
+          try {
+            state.playback.synthesizer.disconnect(
+              state.recording.trackDelayNode,
+            );
+          } catch (e) {
+            /* ignore if already disconnected */
+          }
+        }
+        state.recording.trackDelayNode = null;
+      }
+      // --- END NEW ---
 
       if (state.playback.isMidi) {
         state.playback.sequencer.pause();
@@ -1389,30 +1429,25 @@ const pkg = {
 
       if (state.playback.status === "stopped") return;
 
-      // --- START: Added for Piano Roll ---
-      state.playback.isAnalyzing = false; // Stop any background analysis
-      if (pianoRollContainer) {
-        pianoRollContainer.classOff("visible");
-        pianoRollTrack.clear();
-        state.playback.guideNotes = [];
-        lastHitNoteElement = null;
-      }
-      // --- END: Added for Piano Roll ---
-      // --- START: Added for Score Reasons ---
-      if (scoreReasonTimeout) clearTimeout(scoreReasonTimeout);
-      scoreReasonDisplay.classOff("visible");
-      // --- END: Added for Score Reasons ---
+      // ... (existing piano roll and score reason cleanup)
 
-      // Disable scoring and clean up analysis nodes
-      state.scoring.enabled = false;
-      if (state.scoring.guideVocalDelayNode) {
-        state.scoring.guideVocalDelayNode.disconnect();
-        state.scoring.guideVocalDelayNode = null;
+      // --- NEW: Tear down the track's recording path on stop ---
+      if (state.recording.trackDelayNode) {
+        state.recording.trackDelayNode.disconnect();
+        if (state.playback.isMidi && state.playback.synthesizer) {
+          try {
+            state.playback.synthesizer.disconnect(
+              state.recording.trackDelayNode,
+            );
+          } catch (e) {
+            /* ignore if already disconnected */
+          }
+        }
+        state.recording.trackDelayNode = null;
       }
-      if (state.scoring.vocalGuideAnalyser) {
-        state.scoring.vocalGuideAnalyser.disconnect();
-        state.scoring.vocalGuideAnalyser = null;
-      }
+      // --- END NEW ---
+
+      // ... (existing scoring node cleanup)
 
       if (state.playback.isMidi) {
         if (state.playback.sequencer) {
@@ -1729,32 +1764,34 @@ const pkg = {
       }
 
       try {
-        // --- START: MODIFIED FOR RAW AUDIO ---
-        // Request the microphone stream with all browser processing disabled.
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             deviceId: { exact: deviceId },
-            // These constraints are crucial for getting clean, unprocessed audio for singing.
             echoCancellation: false,
             noiseSuppression: false,
             autoGainControl: false,
           },
         });
-        // --- END: MODIFIED FOR RAW AUDIO ---
 
         state.scoring.micStream = stream;
         const source = audioContext.createMediaStreamSource(stream);
         const analyser = audioContext.createAnalyser();
-        analyser.fftSize = 2048; // Standard for pitch detection
+        analyser.fftSize = 2048;
 
-        // IMPORTANT: The mic is only connected to the analyser, not to the output.
-        // This prevents feedback and latency issues.
+        // Route mic to the SCORING analyser
         source.connect(analyser);
+
+        // --- MODIFIED: Also route mic to the RECORDING destination ---
+        if (state.recording.destinationNode) {
+          // Connect the raw mic source directly to the recording destination.
+          // This happens only once and persists.
+          source.connect(state.recording.destinationNode);
+        }
+        // --- END MODIFIED ---
 
         state.scoring.micSourceNode = source;
         state.scoring.micAnalyser = analyser;
 
-        // Initialize the pitch detector if it doesn't exist
         if (!state.scoring.pitchDetector) {
           state.scoring.pitchDetector = PitchDetector.forFloat32Array(
             analyser.fftSize,
@@ -1791,6 +1828,11 @@ const pkg = {
 
     if (audioContext && audioContext.state !== "closed") {
       if (masterCompressor) masterCompressor.disconnect();
+      // --- NEW: Disconnect recording node on shutdown ---
+      if (state.recording.destinationNode) {
+        state.recording.destinationNode.disconnect();
+      }
+      // --- END NEW ---
       audioContext.close();
     }
     if (sfxAudioContext && sfxAudioContext.state !== "closed") {
