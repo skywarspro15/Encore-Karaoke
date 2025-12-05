@@ -1423,6 +1423,8 @@ const pkg = {
 
     let countdownTimers = [];
     let nextLineUpdateTimeout = null;
+    let countdownTargetTime = null;
+    let lastCountdownTick = null;
 
     function animateNumber(element, target, duration, isFloat = true) {
       return new Promise((resolve) => {
@@ -1884,39 +1886,17 @@ const pkg = {
         introCard.classOn("visible");
         let lrcParsedLyrics = [],
           currentLrcIndex = -1;
-        const scheduleCountdown = (targetTime, currentTime) => {
+        let countdownTargetTime = null;
+        let lastCountdownTick = null;
+        // Set a target time for the countdown. The actual displayed tick will be
+        // derived from Forte time updates so it follows playbackRate changes.
+        const scheduleCountdown = (targetTime /*, _currentTime */) => {
+          // clear any old timers (kept for backwards compatibility)
           countdownTimers.forEach(clearTimeout);
           countdownTimers = [];
-          const delays = {
-            show3: (targetTime - 3 - currentTime) * 1000,
-            show2: (targetTime - 2 - currentTime) * 1000,
-            show1: (targetTime - 1 - currentTime) * 1000,
-            hide: (targetTime - currentTime) * 1000,
-          };
-          if (delays.show3 > 0)
-            countdownTimers.push(
-              setTimeout(() => {
-                countdownDisplay.text("3").classOn("visible");
-              }, delays.show3),
-            );
-          if (delays.show2 > 0)
-            countdownTimers.push(
-              setTimeout(() => {
-                countdownDisplay.text("2");
-              }, delays.show2),
-            );
-          if (delays.show1 > 0)
-            countdownTimers.push(
-              setTimeout(() => {
-                countdownDisplay.text("1");
-              }, delays.show1),
-            );
-          if (delays.hide > 0)
-            countdownTimers.push(
-              setTimeout(() => {
-                countdownDisplay.classOff("visible").text("");
-              }, delays.hide),
-            );
+          countdownTargetTime = targetTime;
+          lastCountdownTick = null;
+          countdownDisplay.classOff("visible").text("");
         };
         if (playbackState.isMidi) {
           midiLyricsContainer.styleJs({ display: "flex" });
@@ -2064,7 +2044,7 @@ const pkg = {
             renderLrcLine(lrcDisplayLines[1], lrcParsedLyrics[1]);
             lrcDisplayLines[1].classOn("next");
             if (lrcParsedLyrics[0].time > 8.0) {
-              scheduleCountdown(lrcParsedLyrics[0].time, 0);
+              scheduleCountdown(lrcParsedLyrics[0].time);
             }
           }
           if (mvPlayer) mvPlayer.play().catch(console.error);
@@ -2088,6 +2068,25 @@ const pkg = {
                 driftMs > 0 ? CORRECTION_RATE : 1.0 / CORRECTION_RATE;
             } else if (mvPlayer.playbackRate !== 1.0) {
               mvPlayer.playbackRate = 1.0;
+            }
+          }
+          // Drive countdown display from the authoritative playback currentTime.
+          if (countdownTargetTime !== null) {
+            const remaining = countdownTargetTime - currentTime;
+            let tick = null;
+            if (remaining > 3) tick = null;
+            else if (remaining > 2) tick = "3";
+            else if (remaining > 1) tick = "2";
+            else if (remaining > 0) tick = "1";
+            else {
+              // countdown reached or passed target
+              tick = null;
+              countdownTargetTime = null;
+            }
+            if (tick !== lastCountdownTick) {
+              lastCountdownTick = tick;
+              if (tick === null) countdownDisplay.classOff("visible").text("");
+              else countdownDisplay.text(tick).classOn("visible");
             }
           }
           if (lrcParsedLyrics.length === 0 || playbackState.isMidi) return;
@@ -2126,7 +2125,7 @@ const pkg = {
             if (nextLine) {
               lineDurationMs = (nextLine.time - currentLine.time) * 1000;
               if (lineDurationMs / 1000 > 8.0) {
-                scheduleCountdown(nextLine.time, currentTime);
+                scheduleCountdown(nextLine.time);
               }
             }
             const delay = lineDurationMs / 2;
@@ -2153,30 +2152,9 @@ const pkg = {
       countdownTimers.forEach(clearTimeout);
       nextLineUpdateTimeout = null;
       countdownTimers = [];
+      countdownTargetTime = null;
+      lastCountdownTick = null;
       countdownDisplay.classOff("visible").text("");
-      if (timeUpdateHandler)
-        document.removeEventListener(
-          "CherryTree.Forte.Playback.TimeUpdate",
-          timeUpdateHandler,
-        );
-      if (lyricEventHandler)
-        document.removeEventListener(
-          "CherryTree.Forte.Playback.LyricEvent",
-          lyricEventHandler,
-        );
-      if (scoreUpdateHandler)
-        document.removeEventListener(
-          "CherryTree.Forte.Scoring.Update",
-          scoreUpdateHandler,
-        );
-      ScoreHUD.hide();
-      timeUpdateHandler = null;
-      lyricEventHandler = null;
-      scoreUpdateHandler = null;
-      lastPlaybackStatus = null;
-      state.currentSongIsYouTube = false;
-      state.currentSongIsMultiplexed = false;
-      state.currentSongIsMV = false;
     };
 
     const transitionAfterSong = () => {
@@ -2439,8 +2417,9 @@ const pkg = {
           newIndex < 0 ? 0 : newIndex + 1,
         );
       else newIndex = Math.max(0, newIndex - 1);
-      if (newIndex !== state.highlightedIndex)
+      if (newIndex !== state.highlightedIndex) {
         state.highlightedIndex = newIndex;
+      }
       updateMenuUI();
     };
 
