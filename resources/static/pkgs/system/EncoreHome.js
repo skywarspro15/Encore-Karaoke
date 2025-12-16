@@ -1159,7 +1159,7 @@ class EncoreController {
     });
 
     this.dom.postSongScreen.styleJs({ opacity: "1", pointerEvents: "all" });
-    this.Forte.playSfx("/assets/audio/fanfare.mp3");
+    // this.Forte.playSfx("/assets/audio/fanfare.mp3");
 
     // Calculate Grade
     const s = scoreData.finalScore;
