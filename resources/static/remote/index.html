@@ -52,6 +52,7 @@
         height: 100%;
         width: 100%;
         max-width: 100%;
+        overflow: hidden;
       }
 
       /* --- Header --- */
@@ -417,187 +418,192 @@
         <h1>ENCORE LINK</h1>
       </header>
 
-      <!-- Remote View (Left on Tablet, Main on Mobile) -->
-      <div id="remote-view" class="view active">
-        <div class="remote-title-desktop">ENCORE</div>
+      <!-- View Container (flexes to fill remaining space) -->
+      <div class="view-container">
+        <!-- Remote View (Left on Tablet, Main on Mobile) -->
+        <div id="remote-view" class="view active">
+          <div class="remote-title-desktop">ENCORE</div>
 
-        <div class="remote-grid">
-          <!-- Playback Controls (top row, full width) -->
-          <button data-type="stop" data-value="Escape" class="btn-danger">
-            STOP
-          </button>
-          <button
-            data-type="reserve"
-            data-value="Enter"
-            class="btn-primary span-2"
-          >
-            RESERVE
-          </button>
-          <button data-type="toggle_bgv">BGV</button>
-
-          <!-- Numpad (centered, 3x4 grid) -->
-          <div class="numpad-grid" style="grid-column: span 4">
-            <button class="numpad-btn" data-type="digit" data-value="1">
-              1
-            </button>
-            <button class="numpad-btn" data-type="digit" data-value="2">
-              2
-            </button>
-            <button class="numpad-btn" data-type="digit" data-value="3">
-              3
-            </button>
-            <button class="numpad-btn" data-type="digit" data-value="4">
-              4
-            </button>
-            <button class="numpad-btn" data-type="digit" data-value="5">
-              5
-            </button>
-            <button class="numpad-btn" data-type="digit" data-value="6">
-              6
-            </button>
-            <button class="numpad-btn" data-type="digit" data-value="7">
-              7
-            </button>
-            <button class="numpad-btn" data-type="digit" data-value="8">
-              8
-            </button>
-            <button class="numpad-btn" data-type="digit" data-value="9">
-              9
+          <div class="remote-grid">
+            <!-- Playback Controls (top row, full width) -->
+            <button data-type="stop" data-value="Escape" class="btn-danger">
+              STOP
             </button>
             <button
-              class="numpad-btn"
-              data-type="backspace"
-              data-value="Backspace"
+              data-type="reserve"
+              data-value="Enter"
+              class="btn-primary span-2"
+            >
+              RESERVE
+            </button>
+            <button data-type="toggle_bgv">BGV</button>
+
+            <!-- Numpad (centered, 3x4 grid) -->
+            <div class="numpad-grid" style="grid-column: span 4">
+              <button class="numpad-btn" data-type="digit" data-value="1">
+                1
+              </button>
+              <button class="numpad-btn" data-type="digit" data-value="2">
+                2
+              </button>
+              <button class="numpad-btn" data-type="digit" data-value="3">
+                3
+              </button>
+              <button class="numpad-btn" data-type="digit" data-value="4">
+                4
+              </button>
+              <button class="numpad-btn" data-type="digit" data-value="5">
+                5
+              </button>
+              <button class="numpad-btn" data-type="digit" data-value="6">
+                6
+              </button>
+              <button class="numpad-btn" data-type="digit" data-value="7">
+                7
+              </button>
+              <button class="numpad-btn" data-type="digit" data-value="8">
+                8
+              </button>
+              <button class="numpad-btn" data-type="digit" data-value="9">
+                9
+              </button>
+              <button
+                class="numpad-btn"
+                data-type="backspace"
+                data-value="Backspace"
+              >
+                &larr;
+              </button>
+              <button class="numpad-btn" data-type="digit" data-value="0">
+                0
+              </button>
+              <div></div>
+            </div>
+
+            <!-- Key Controls Row -->
+            <div class="numpad-controls-row" style="grid-column: span 4">
+              <button data-type="key_up" data-value="ArrowUp">
+                KEY &uarr;
+              </button>
+              <button data-type="key_down" data-value="ArrowDown">
+                KEY &darr;
+              </button>
+            </div>
+            <!-- Volume Controls Row -->
+            <div class="numpad-controls-row" style="grid-column: span 4">
+              <button data-type="vol_up" data-value="=">VOL &uarr;</button>
+              <button data-type="vol_down" data-value="-">VOL &darr;</button>
+            </div>
+
+            <!-- Navigation / Extra -->
+            <button
+              class="btn-secondary span-4 mobile-only"
+              id="open-library-btn"
+            >
+              BROWSE SONGLIST
+            </button>
+            <button
+              data-type="yt_search"
+              class="span-4 mobile-only"
+              style="margin-top: 0.5rem"
+            >
+              YOUTUBE SEARCH
+            </button>
+          </div>
+        </div>
+
+        <!-- Song List / Library View (Right on Tablet, Overlay on Mobile) -->
+        <div id="songlist-view" class="view">
+          <div class="library-header">
+            <button
+              class="mobile-only"
+              id="close-library-btn"
+              style="width: 50px; font-size: 1.5rem"
             >
               &larr;
             </button>
-            <button class="numpad-btn" data-type="digit" data-value="0">
-              0
-            </button>
-            <div></div>
-          </div>
-
-          <!-- Key Controls Row -->
-          <div class="numpad-controls-row" style="grid-column: span 4">
-            <button data-type="key_up" data-value="ArrowUp">KEY &uarr;</button>
-            <button data-type="key_down" data-value="ArrowDown">
-              KEY &darr;
-            </button>
-          </div>
-          <!-- Volume Controls Row -->
-          <div class="numpad-controls-row" style="grid-column: span 4">
-            <button data-type="vol_up" data-value="=">VOL &uarr;</button>
-            <button data-type="vol_down" data-value="-">VOL &darr;</button>
-          </div>
-
-          <!-- Navigation / Extra -->
-          <button
-            class="btn-secondary span-4 mobile-only"
-            id="open-library-btn"
-          >
-            BROWSE SONGLIST
-          </button>
-          <button
-            data-type="yt_search"
-            class="span-4 mobile-only"
-            style="margin-top: 0.5rem"
-          >
-            YOUTUBE SEARCH
-          </button>
-        </div>
-      </div>
-
-      <!-- Song List / Library View (Right on Tablet, Overlay on Mobile) -->
-      <div id="songlist-view" class="view">
-        <div class="library-header">
-          <button
-            class="mobile-only"
-            id="close-library-btn"
-            style="width: 50px; font-size: 1.5rem"
-          >
-            &larr;
-          </button>
-          <button
-            id="library-back-btn"
-            style="width: 50px; font-size: 1.5rem; display: none"
-          >
-            &larr;
-          </button>
-          <input
-            type="text"
-            id="library-search"
-            class="search-bar"
-            placeholder="Search artists..."
-          />
-        </div>
-
-        <div class="library-content">
-          <!-- Artist Grid View -->
-          <div id="artist-view-container">
-            <div class="artist-grid" id="artist-grid">
-              <!-- JS Injected Artists -->
-            </div>
-          </div>
-
-          <!-- Specific Songs List View -->
-          <div id="song-view-container" class="song-list-container">
-            <h3
-              id="current-artist-name"
-              style="margin: 0 0 1rem 0; color: var(--primary)"
+            <button
+              id="library-back-btn"
+              style="width: 50px; font-size: 1.5rem; display: none"
             >
-              Artist Name
-            </h3>
-            <div id="artist-songs-list">
-              <!-- JS Injected Songs -->
+              &larr;
+            </button>
+            <input
+              type="text"
+              id="library-search"
+              class="search-bar"
+              placeholder="Search artists..."
+            />
+          </div>
+
+          <div class="library-content">
+            <!-- Artist Grid View -->
+            <div id="artist-view-container">
+              <div class="artist-grid" id="artist-grid">
+                <!-- JS Injected Artists -->
+              </div>
+            </div>
+
+            <!-- Specific Songs List View -->
+            <div id="song-view-container" class="song-list-container">
+              <h3
+                id="current-artist-name"
+                style="margin: 0 0 1rem 0; color: var(--primary)"
+              >
+                Artist Name
+              </h3>
+              <div id="artist-songs-list">
+                <!-- JS Injected Songs -->
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- YouTube Search View (Mobile/Overlay only) -->
-      <div id="search-view" class="view" style="z-index: 3">
-        <div class="library-header">
-          <button id="close-yt-btn" style="width: 50px">&larr;</button>
-          <input
-            type="text"
-            id="yt-input"
-            class="search-bar"
-            placeholder="Search YouTube..."
-          />
-          <button id="yt-submit-btn" class="btn-primary" style="width: 60px">
-            GO
-          </button>
-        </div>
-        <div
-          style="
-            padding: 2rem;
-            display: grid;
-            gap: 1rem;
-            grid-template-columns: 1fr 1fr;
-          "
-        >
-          <button
-            data-type="nav_up"
-            data-value="ArrowUp"
-            style="height: 100px; font-size: 2rem"
+        <!-- YouTube Search View (Mobile/Overlay only) -->
+        <div id="search-view" class="view" style="z-index: 3">
+          <div class="library-header">
+            <button id="close-yt-btn" style="width: 50px">&larr;</button>
+            <input
+              type="text"
+              id="yt-input"
+              class="search-bar"
+              placeholder="Search YouTube..."
+            />
+            <button id="yt-submit-btn" class="btn-primary" style="width: 60px">
+              GO
+            </button>
+          </div>
+          <div
+            style="
+              padding: 2rem;
+              display: grid;
+              gap: 1rem;
+              grid-template-columns: 1fr 1fr;
+            "
           >
-            &uarr;
-          </button>
-          <button
-            data-type="nav_down"
-            data-value="ArrowDown"
-            style="height: 100px; font-size: 2rem"
-          >
-            &darr;
-          </button>
-          <button
-            data-type="enter"
-            data-value="Enter"
-            class="span-2 btn-primary"
-            style="height: 80px"
-          >
-            SELECT / PLAY
-          </button>
+            <button
+              data-type="nav_up"
+              data-value="ArrowUp"
+              style="height: 100px; font-size: 2rem"
+            >
+              &uarr;
+            </button>
+            <button
+              data-type="nav_down"
+              data-value="ArrowDown"
+              style="height: 100px; font-size: 2rem"
+            >
+              &darr;
+            </button>
+            <button
+              data-type="enter"
+              data-value="Enter"
+              class="span-2 btn-primary"
+              style="height: 80px"
+            >
+              SELECT / PLAY
+            </button>
+          </div>
         </div>
       </div>
     </div>
