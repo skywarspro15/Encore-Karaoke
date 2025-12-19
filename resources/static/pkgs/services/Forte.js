@@ -68,6 +68,7 @@ let pianoRollUserPitch = null;
 let lastHitNoteElement = null;
 let scoreReasonDisplay = null;
 let scoreReasonTimeout = null;
+const PIXELS_PER_SECOND = 150; // Const for direct access
 
 // Scoring Constants
 const GUIDE_CLARITY_THRESHOLD = 0.5;
@@ -77,6 +78,10 @@ const VIBRATO_HOLD_DURATION_MS = 200;
 const VIBRATO_STD_DEV_MIN = 0.4;
 const VIBRATO_STD_DEV_MAX = 8.0;
 const TRANSITION_ANALYSIS_WINDOW_MS = 100;
+
+// Optimization: Scoring Throttle
+let lastScoreTime = 0;
+const SCORE_UPDATE_INTERVAL = 33; // ~30 FPS
 
 // Reusable Buffers
 let guideAnalyserBuffer = null;
@@ -196,26 +201,32 @@ function updateScore() {
     vocalGuideAnalyser: guideAnalyser,
     micAnalyser,
   } = state.scoring;
+
+  // Buffers are reused globally to save GC
   if (!guideAnalyserBuffer)
     guideAnalyserBuffer = new Float32Array(guideAnalyser.fftSize);
   if (!micAnalyserBuffer)
     micAnalyserBuffer = new Float32Array(micAnalyser.fftSize);
+
   guideAnalyser.getFloatTimeDomainData(guideAnalyserBuffer);
   micAnalyser.getFloatTimeDomainData(micAnalyserBuffer);
 
+  const sampleRate = audioContext.sampleRate;
   const [guidePitch, guideClarity] = pitchDetector.findPitch(
     guideAnalyserBuffer,
-    audioContext.sampleRate,
+    sampleRate,
   );
   const [micPitch, micClarity] = pitchDetector.findPitch(
     micAnalyserBuffer,
-    audioContext.sampleRate,
+    sampleRate,
   );
+
+  const now = performance.now();
 
   state.scoring.pitchHistory.push({
     pitch: micPitch,
     clarity: micClarity,
-    time: performance.now(),
+    time: now,
   });
   if (state.scoring.pitchHistory.length > PITCH_HISTORY_LENGTH)
     state.scoring.pitchHistory.shift();
@@ -245,7 +256,7 @@ function updateScore() {
   // Falling Edge (Note End)
   if (!isGuideNoteActive && wasGuideNoteActive) {
     if (state.scoring.isHoldingNote) {
-      const holdDuration = performance.now() - state.scoring.noteHoldStartTime;
+      const holdDuration = now - state.scoring.noteHoldStartTime;
       if (holdDuration > VIBRATO_HOLD_DURATION_MS) {
         state.scoring.vibratoOpportunities++;
       }
@@ -259,7 +270,7 @@ function updateScore() {
   let isCorrectPitch = false;
   if (isGuideNoteActive && isSinging) {
     let normalizedMicPitch = micPitch;
-    // Octave normalization
+    // Octave normalization (Iterative multiplication is fast enough here)
     while (normalizedMicPitch < guidePitch * 0.75) normalizedMicPitch *= 2;
     while (normalizedMicPitch > guidePitch * 1.5) normalizedMicPitch /= 2;
     const centsDifference = 1200 * Math.log2(normalizedMicPitch / guidePitch);
@@ -270,7 +281,7 @@ function updateScore() {
   if (isCorrectPitch) {
     if (!state.scoring.isHoldingNote) {
       state.scoring.isHoldingNote = true;
-      state.scoring.noteHoldStartTime = performance.now();
+      state.scoring.noteHoldStartTime = now;
     }
     if (!state.scoring.hasHitCurrentNote) {
       state.scoring.notesHit++;
@@ -285,19 +296,22 @@ function updateScore() {
       !state.scoring.hasScoredCurrentTransition &&
       state.scoring.lastGuidePitch > 0
     ) {
-      const analysisStartTime =
-        performance.now() - TRANSITION_ANALYSIS_WINDOW_MS;
-      const recentPitches = state.scoring.pitchHistory
-        .filter(
-          (p) =>
-            p.time >= analysisStartTime && p.clarity > MIC_CLARITY_THRESHOLD,
-        )
-        .map((p) => p.pitch);
+      const analysisStartTime = now - TRANSITION_ANALYSIS_WINDOW_MS;
+      // Optimizing filter/map: iterate once
+      let startPitch = -1;
+      let endPitch = -1;
+      let count = 0;
 
-      if (recentPitches.length > 5) {
-        const startPitch = recentPitches[0];
-        const endPitch = recentPitches[recentPitches.length - 1];
+      for (let i = 0; i < state.scoring.pitchHistory.length; i++) {
+        const p = state.scoring.pitchHistory[i];
+        if (p.time >= analysisStartTime && p.clarity > MIC_CLARITY_THRESHOLD) {
+          if (startPitch === -1) startPitch = p.pitch;
+          endPitch = p.pitch;
+          count++;
+        }
+      }
 
+      if (count > 5) {
         // Upband hit
         if (
           guidePitch > state.scoring.lastGuidePitch * 1.05 &&
@@ -320,22 +334,32 @@ function updateScore() {
     }
 
     // Vibrato Detection
-    const holdDuration = performance.now() - state.scoring.noteHoldStartTime;
+    const holdDuration = now - state.scoring.noteHoldStartTime;
     if (holdDuration > VIBRATO_HOLD_DURATION_MS) {
-      const recentPitches = state.scoring.pitchHistory
-        .filter((p) => p.clarity > MIC_CLARITY_THRESHOLD)
-        .map((p) => p.pitch);
-      if (recentPitches.length > 10) {
-        const mean =
-          recentPitches.reduce((a, b) => a + b, 0) / recentPitches.length;
-        const stdDev = Math.sqrt(
-          recentPitches
-            .map((x) => Math.pow(x - mean, 2))
-            .reduce((a, b) => a + b) / recentPitches.length,
-        );
+      // Manual loop for performance instead of filter/map/reduce
+      let sum = 0;
+      let count = 0;
+      const pitches = [];
+
+      for (const p of state.scoring.pitchHistory) {
+        if (p.clarity > MIC_CLARITY_THRESHOLD) {
+          sum += p.pitch;
+          pitches.push(p.pitch);
+          count++;
+        }
+      }
+
+      if (count > 10) {
+        const mean = sum / count;
+        let sqDiffSum = 0;
+        for (const val of pitches) {
+          sqDiffSum += (val - mean) ** 2;
+        }
+        const stdDev = Math.sqrt(sqDiffSum / count);
+
         if (stdDev >= VIBRATO_STD_DEV_MIN && stdDev <= VIBRATO_STD_DEV_MAX) {
           state.scoring.vibratoNotesHit++;
-          state.scoring.vibratoOpportunities++; // Credit opportunity immediately
+          state.scoring.vibratoOpportunities++;
           state.scoring.isHoldingNote = false;
           if (!state.scoring.hasScoredCurrentNoteStyle) {
             showScoreReason("VIBRATO!", "vibrato");
@@ -347,7 +371,7 @@ function updateScore() {
   } else {
     // Incorrect pitch
     if (state.scoring.isHoldingNote) {
-      const holdDuration = performance.now() - state.scoring.noteHoldStartTime;
+      const holdDuration = now - state.scoring.noteHoldStartTime;
       if (holdDuration > VIBRATO_HOLD_DURATION_MS) {
         state.scoring.vibratoOpportunities++;
       }
@@ -355,7 +379,7 @@ function updateScore() {
     state.scoring.isHoldingNote = false;
   }
 
-  // 4. Update Piano Roll UI
+  // 4. Update Piano Roll UI (User trace only)
   if (
     pianoRollContainer &&
     pianoRollContainer.elm.classList.contains("visible")
@@ -364,37 +388,47 @@ function updateScore() {
       const minMidi = 48; // C3
       const maxMidi = 84; // C6
       const rollHeight = 150;
-      if (!isFinite(pitch) || pitch < minMidi) return rollHeight;
+      // Inline simple checks
+      if (pitch < minMidi) return rollHeight;
       if (pitch > maxMidi) return 0;
-      const pitchRange = maxMidi - minMidi;
-      const normalizedPitch = (pitch - minMidi) / pitchRange;
-      return rollHeight - normalizedPitch * rollHeight;
+      return (
+        rollHeight - ((pitch - minMidi) / (maxMidi - minMidi)) * rollHeight
+      );
     };
 
     // User pitch trace
     const midiMicPitch = 12 * Math.log2(micPitch / 440) + 69;
     if (micClarity > MIC_CLARITY_THRESHOLD && midiMicPitch > 0) {
-      pianoRollUserPitch.styleJs({
-        top: `${pitchToY(midiMicPitch) - 2}px`,
-        opacity: "1",
-      });
+      // Direct DOM access prevents object creation overhead
+      pianoRollUserPitch.elm.style.top = `${pitchToY(midiMicPitch) - 2}px`;
+      pianoRollUserPitch.elm.style.opacity = "1";
     } else {
-      pianoRollUserPitch.styleJs({ opacity: "0" });
+      pianoRollUserPitch.elm.style.opacity = "0";
     }
 
     // Note highlighting
+    // Optimization: Don't search entire array every frame.
+    // However, guideNotes array is usually small enough for find() to be okay.
+    // To optimize further, one could keep an index of the "current note".
     const currentTime = pkg.data.getPlaybackState().currentTime;
     const notes = state.playback.guideNotes;
+
     if (notes) {
       if (lastHitNoteElement) {
-        lastHitNoteElement.classOff("hit");
+        // Only modify DOM if class is present
+        if (lastHitNoteElement.elm.classList.contains("hit")) {
+          lastHitNoteElement.classOff("hit");
+        }
         lastHitNoteElement = null;
       }
+
       const currentNote = notes.find(
         (n) =>
           currentTime >= n.startTime && currentTime < n.startTime + n.duration,
       );
+
       if (currentNote && isCorrectPitch) {
+        // ID lookup is fast, but storing reference in map would be faster if needed
         const noteEl = pianoRollTrack.qs(`#forte-note-${currentNote.id}`);
         if (noteEl) {
           noteEl.classOn("hit");
@@ -451,25 +485,32 @@ function timingLoop() {
     return;
   }
   const { currentTime, duration } = pkg.data.getPlaybackState();
+
+  // Optimization: Dispatch events less frequently if possible?
+  // Currently kept per frame for smooth UI sliders.
   document.dispatchEvent(
     new CustomEvent("CherryTree.Forte.Playback.TimeUpdate", {
       detail: { currentTime, duration },
     }),
   );
 
-  // Scroll Piano Roll
+  // Scroll Piano Roll - Optimized DOM access
   if (
     pianoRollContainer &&
-    pianoRollContainer.elm.classList.contains("visible")
+    pianoRollContainer.elm.classList.contains("visible") &&
+    pianoRollTrack
   ) {
-    const PIXELS_PER_SECOND = 150;
-    pianoRollTrack.styleJs({
-      transform: `translateX(-${currentTime * PIXELS_PER_SECOND}px)`,
-    });
+    // Direct style manipulation bypasses library overhead in hot loop
+    pianoRollTrack.elm.style.transform = `translateX(-${
+      currentTime * PIXELS_PER_SECOND
+    }px)`;
   }
 
-  if (state.scoring.enabled) {
+  // Scoring Throttle
+  const now = performance.now();
+  if (state.scoring.enabled && now - lastScoreTime > SCORE_UPDATE_INTERVAL) {
     updateScore();
+    lastScoreTime = now;
   }
 
   if (currentTime >= duration && duration > 0) {
@@ -487,29 +528,32 @@ function timingLoop() {
  */
 function renderPianoRollNotes(notes) {
   if (!pianoRollTrack) return;
-  const PIXELS_PER_SECOND = 150;
+
+  // Create document fragment for batched append
+  const fragment = document.createDocumentFragment();
+
   const pitchToY = (pitch) => {
     const minMidi = 48; // C3
     const maxMidi = 84; // C6
     const rollHeight = 150;
     if (pitch < minMidi) return rollHeight;
     if (pitch > maxMidi) return 0;
-    const pitchRange = maxMidi - minMidi;
-    const normalizedPitch = (pitch - minMidi) / pitchRange;
+    const normalizedPitch = (pitch - minMidi) / (maxMidi - minMidi);
     return rollHeight - normalizedPitch * rollHeight;
   };
 
   for (const note of notes) {
-    new Html("div")
-      .class("forte-piano-note")
-      .id(`forte-note-${note.id}`)
-      .styleJs({
-        left: `${note.startTime * PIXELS_PER_SECOND}px`,
-        width: `${note.duration * PIXELS_PER_SECOND}px`,
-        top: `${pitchToY(note.pitch)}px`,
-      })
-      .appendTo(pianoRollTrack);
+    const div = document.createElement("div");
+    div.className = "forte-piano-note";
+    div.id = `forte-note-${note.id}`;
+    div.style.left = `${note.startTime * PIXELS_PER_SECOND}px`;
+    div.style.width = `${note.duration * PIXELS_PER_SECOND}px`;
+    div.style.top = `${pitchToY(note.pitch)}px`;
+    fragment.appendChild(div);
   }
+
+  // Single reflow
+  pianoRollTrack.elm.appendChild(fragment);
 }
 
 /**
@@ -519,12 +563,17 @@ function renderPianoRollNotes(notes) {
 function startIncrementalGuideAnalysis(audioBuffer) {
   console.log("[FORTE SVC] Starting incremental analysis for piano roll...");
   state.playback.isAnalyzing = true;
-  const channelData = audioBuffer.getChannelData(1);
+  const channelData = audioBuffer.getChannelData(1); // Usually channel 1 is guide in karaoke multiplex
   const sampleRate = audioBuffer.sampleRate;
-  const detector = PitchDetector.forFloat32Array(2048);
+
+  // reused buffer size
+  const bufferSize = 2048;
+  const detector = PitchDetector.forFloat32Array(bufferSize);
+
   const minNoteDuration = 0.08;
-  const chunkSize = 2048;
-  const stepSize = 512;
+  // Optimization: Increased stepSize.
+  // 512 was 75% overlap (too heavy). 1024 is 50% overlap (sufficient for visualization).
+  const stepSize = 1024;
   let noteIdCounter = state.playback.guideNotes.length;
 
   let analysisPosition = 0;
@@ -541,17 +590,31 @@ function startIncrementalGuideAnalysis(audioBuffer) {
 
     const chunkEndPosition = Math.min(
       analysisPosition + analysisChunkSamples,
-      channelData.length - chunkSize,
+      channelData.length - bufferSize,
     );
     const foundNotes = [];
 
+    // Local vars for loop speed
+    const dataLen = channelData.length;
+
     for (let i = analysisPosition; i < chunkEndPosition; i += stepSize) {
-      const chunk = channelData.slice(i, i + chunkSize);
+      // slice is somewhat expensive, but necessary here.
+      // subarray is faster but creates a view. Pitchy might need a copy if it modifies input,
+      // but usually subarray is safe. Trying subarray for perf.
+      const chunk = channelData.subarray(i, i + bufferSize);
+
       const [pitch, clarity] = detector.findPitch(chunk, sampleRate);
       const time = i / sampleRate;
+
+      // Inline MIDI calc: 69 + 12 * log2(pitch/440)
       const midiPitch = 12 * Math.log2(pitch / 440) + 69;
+
+      // Simplified checks
       const isNoteActive =
-        clarity > GUIDE_CLARITY_THRESHOLD && pitch > 50 && isFinite(midiPitch);
+        clarity > GUIDE_CLARITY_THRESHOLD &&
+        pitch > 50 &&
+        midiPitch >= 0 &&
+        midiPitch < 128;
 
       if (isNoteActive) {
         if (!currentNote) {
@@ -566,12 +629,14 @@ function startIncrementalGuideAnalysis(audioBuffer) {
       } else if (currentNote) {
         const duration = time - currentNote.startTime;
         if (duration > minNoteDuration) {
-          const avgPitch =
-            currentNote.pitches.reduce((a, b) => a + b, 0) /
-            currentNote.pitches.length;
+          // Average pitch
+          let pSum = 0;
+          const pLen = currentNote.pitches.length;
+          for (let k = 0; k < pLen; k++) pSum += currentNote.pitches[k];
+
           foundNotes.push({
             id: noteIdCounter++,
-            pitch: avgPitch,
+            pitch: pSum / pLen,
             startTime: currentNote.startTime,
             duration: duration,
           });
@@ -585,6 +650,7 @@ function startIncrementalGuideAnalysis(audioBuffer) {
       const lastGlobalNote =
         state.playback.guideNotes[state.playback.guideNotes.length - 1];
       const firstChunkNote = foundNotes[0];
+
       if (
         lastGlobalNote &&
         firstChunkNote.startTime -
@@ -596,11 +662,13 @@ function startIncrementalGuideAnalysis(audioBuffer) {
           firstChunkNote.startTime +
           firstChunkNote.duration -
           lastGlobalNote.startTime;
+
         const noteEl = pianoRollTrack.qs(`#forte-note-${lastGlobalNote.id}`);
         if (noteEl)
-          noteEl.styleJs({
-            width: `${lastGlobalNote.duration * 150}px`,
-          });
+          // Direct update
+          noteEl.elm.style.width = `${
+            lastGlobalNote.duration * PIXELS_PER_SECOND
+          }px`;
         foundNotes.shift();
       }
 
@@ -609,19 +677,23 @@ function startIncrementalGuideAnalysis(audioBuffer) {
     }
 
     analysisPosition = chunkEndPosition;
-    if (analysisPosition < channelData.length - chunkSize) {
-      setTimeout(processChunk, 10);
+    if (analysisPosition < dataLen - bufferSize) {
+      // Use requestAnimationFrame for scheduling next chunk to yield to UI more effectively
+      // or a small timeout.
+      setTimeout(processChunk, 16);
     } else {
+      // Process final note trailing at end
       if (currentNote) {
-        const time = (channelData.length - 1) / sampleRate;
+        const time = (dataLen - 1) / sampleRate;
         const duration = time - currentNote.startTime;
         if (duration > minNoteDuration) {
-          const avgPitch =
-            currentNote.pitches.reduce((a, b) => a + b, 0) /
-            currentNote.pitches.length;
+          let pSum = 0;
+          const pLen = currentNote.pitches.length;
+          for (let k = 0; k < pLen; k++) pSum += currentNote.pitches[k];
+
           const finalNote = {
             id: noteIdCounter++,
-            pitch: avgPitch,
+            pitch: pSum / pLen,
             startTime: currentNote.startTime,
             duration: duration,
           };
@@ -634,7 +706,8 @@ function startIncrementalGuideAnalysis(audioBuffer) {
     }
   }
 
-  setTimeout(processChunk, 10);
+  // Kickoff
+  setTimeout(processChunk, 16);
 }
 
 // --- Service Definition ---
@@ -670,6 +743,7 @@ const pkg = {
             transform: translateX(-20px);
             transition: opacity 0.3s ease, transform 0.3s ease;
             pointer-events: none;
+            will-change: opacity, transform;
         }
         .forte-toast.visible {
             opacity: 1;
@@ -689,6 +763,7 @@ const pkg = {
             opacity: 0;
             transition: opacity 0.5s ease;
             pointer-events: none;
+            will-change: opacity;
         }
         .forte-piano-roll-container.visible {
             opacity: 1;
@@ -719,8 +794,8 @@ const pkg = {
             border-radius: 4px;
             border: 1px solid rgba(1,1,65,0.8);
             box-sizing: border-box;
-            transition: background-color 0.1s linear;
             transform: translateY(-50%);
+            /* Removed transition for better performance during scrolling/rendering */
         }
         .forte-piano-note.hit {
             background-color: #39FF14;
@@ -738,6 +813,7 @@ const pkg = {
             opacity: 0;
             transition: top 0.05s linear, opacity 0.1s linear;
             transform: translateY(-50%);
+            will-change: top, opacity;
         }
         .forte-score-reason {
             position: fixed;
@@ -755,6 +831,7 @@ const pkg = {
             opacity: 0;
             transition: opacity 0.3s ease, transform 0.3s ease;
             pointer-events: none;
+            will-change: opacity, transform;
         }
         .forte-score-reason.visible {
             opacity: 1;
@@ -857,6 +934,7 @@ const pkg = {
     // 5. Initialize PeerJS (Mic)
     try {
       await loadScript("https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js");
+      // IPC call optimization: cache this if it doesn't change
       const peerId = await window.desktopIntegration.ipc.invoke(
         "mic-get-peer-id",
       );
@@ -929,6 +1007,9 @@ const pkg = {
 
   data: {
     getRecordingAudioStream: () => {
+      if (state.playback.isMidi) {
+        throw new Error("This track does not support Recording.");
+      }
       return state.recording.audioStream;
     },
 
@@ -1145,10 +1226,6 @@ const pkg = {
           return;
         state.playback.sequencer.play();
         state.playback.status = "playing";
-
-        if (state.recording.trackDelayNode && state.playback.synthesizer) {
-          state.playback.synthesizer.connect(state.recording.trackDelayNode);
-        }
       } else {
         if (!state.playback.buffer || state.playback.status === "playing")
           return;
@@ -1242,6 +1319,8 @@ const pkg = {
       }
 
       dispatchPlaybackUpdate();
+      // Start loop
+      lastScoreTime = performance.now();
       if (animationFrameId === null) timingLoop();
     },
 

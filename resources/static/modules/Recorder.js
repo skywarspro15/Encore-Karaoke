@@ -51,9 +51,20 @@ export class RecorderModule {
   start() {
     if (this.isRecording || !this.forteSvc || !this.bgvPlayer) return;
 
-    const audioStream = this.forteSvc.getRecordingAudioStream();
-    if (!audioStream || audioStream.getAudioTracks().length === 0) {
-      this.infoBar.showTemp("RECORDING", "Error: No audio stream found.", 4000);
+    let audioStream;
+
+    try {
+      audioStream = this.forteSvc.getRecordingAudioStream();
+      if (!audioStream || audioStream.getAudioTracks().length === 0) {
+        this.infoBar.showTemp(
+          "RECORDING",
+          "Error: No audio stream found.",
+          4000,
+        );
+        return;
+      }
+    } catch (e) {
+      this.infoBar.showTemp("RECORDING", e, 4000);
       return;
     }
 

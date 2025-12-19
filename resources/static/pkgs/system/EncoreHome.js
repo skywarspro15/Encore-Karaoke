@@ -80,6 +80,7 @@ class EncoreController {
     const sfx = [
       "fanfare.mp3",
       "fanfare-2.mp3",
+      "67-kid.mp3",
       ...Array.from({ length: 10 }, (_, i) => `numbers/${i}.wav`),
     ];
     await Promise.all(sfx.map((s) => this.Forte.loadSfx(`/assets/audio/${s}`)));
@@ -88,13 +89,13 @@ class EncoreController {
     this.socket.on("connect", () => console.log("[LINK] Connected to server."));
     this.setupSocketListeners();
 
-    try {
-      const chainRes = await fetch("/pkgs/chains/defaultVocalChain.json");
-      const chain = await chainRes.json();
-      await this.Forte.loadVocalChain(chain);
-    } catch (e) {
-      console.error("[Encore] Vocal chain load failed", e);
-    }
+    // try {
+    //   const chainRes = await fetch("/pkgs/chains/defaultVocalChain.json");
+    //   const chain = await chainRes.json();
+    //   await this.Forte.loadVocalChain(chain);
+    // } catch (e) {
+    //   console.error("[Encore] Vocal chain load failed", e);
+    // }
 
     // Load Songs
     this.songList = this.FsSvc.getSongList();
@@ -1165,6 +1166,9 @@ class EncoreController {
     const s = scoreData.finalScore;
     let rank = "Good";
     let rankColor = "#aed581";
+    if (s == 67) {
+      this.Forte.playSfx("/assets/audio/67-kid.mp3");
+    }
     if (s == 100) {
       rank = "WHAT THE FUCK HOW";
       rankColor = "#00e676";
