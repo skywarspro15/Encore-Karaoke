@@ -34,12 +34,33 @@
         -webkit-tap-highlight-color: transparent;
       }
 
+      /* --- Scrollbar Styling --- */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 3px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.3);
+      }
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+      }
+
       body {
         font-family: "Rajdhani", sans-serif;
         background-color: var(--bg-color);
         color: var(--text);
         margin: 0;
         height: 100vh;
+        width: 100vw;
         display: flex;
         flex-direction: column;
         overflow: hidden;
@@ -51,8 +72,8 @@
         flex-direction: column;
         height: 100%;
         width: 100%;
-        max-width: 100%;
         overflow: hidden;
+        position: relative;
       }
 
       /* --- Header --- */
@@ -81,6 +102,7 @@
         flex: 1;
         position: relative;
         overflow: hidden;
+        width: 100%;
       }
 
       .view {
@@ -89,50 +111,86 @@
         background: var(--bg-color);
         display: flex;
         flex-direction: column;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+      }
+
+      #remote-view {
+        z-index: 1;
+      }
+
+      #songlist-view {
+        z-index: 2;
         transform: translateX(100%);
         transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-        z-index: 1;
         visibility: hidden;
       }
 
-      .view.active {
+      #songlist-view.active {
         transform: translateX(0);
         visibility: visible;
-        z-index: 2;
       }
 
-      /* Remote is the base view, simpler transition logic handled differently on mobile */
-      #remote-view {
-        transform: translateX(0);
+      #search-view {
+        z-index: 50;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        transform: translateY(100%);
+        transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+        background: var(--bg-color);
+        visibility: hidden;
+      }
+
+      #search-view.active {
+        transform: translateY(0);
         visibility: visible;
-        z-index: 1;
-        padding: 1rem;
+      }
+
+      /* --- Remote Controls --- */
+      #remote-view-content {
+        flex: 1;
         overflow-y: auto;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
       }
 
-      /* --- Remote Grid --- */
       .remote-grid {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
         gap: 0.75rem;
-        max-width: 450px;
-        margin: 0 auto;
+        width: 100%;
+        max-width: 400px;
         padding-bottom: 2rem;
       }
-      /* Add a new class for the numpad layout */
+
       .numpad-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         gap: 0.75rem;
         margin-bottom: 0.75rem;
       }
-      .numpad-controls-row {
+
+      /* Wrapper for 2-column control groups (Key/Vol) */
+      .controls-wrapper {
         display: grid;
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: 1fr 1fr;
         gap: 0.75rem;
         margin-bottom: 0.75rem;
       }
 
+      .control-column {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      /* --- Buttons --- */
       button {
         font-family: "Rajdhani", sans-serif;
         background: var(--btn-bg);
@@ -142,14 +200,15 @@
         cursor: pointer;
         font-weight: 700;
         font-size: 1.2rem;
-        padding: 0; /* Centering handled by flex or height */
+        padding: 0;
         display: flex;
         align-items: center;
         justify-content: center;
         transition: all 0.15s ease;
         user-select: none;
-        height: 60px; /* Uniform height */
+        height: 60px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        -webkit-tap-highlight-color: transparent;
       }
 
       button:active {
@@ -185,17 +244,15 @@
         height: 70px;
         background: rgba(255, 255, 255, 0.02);
       }
-      .numpad-zero {
-        grid-column: span 2;
-      }
 
-      /* --- Song List & Artist Grid --- */
+      /* --- Library Styles --- */
       .library-header {
         padding: 0.75rem;
         border-bottom: 1px solid var(--border);
         display: flex;
         gap: 0.5rem;
         background: var(--bg-secondary);
+        flex-shrink: 0;
       }
 
       .search-bar {
@@ -220,63 +277,62 @@
         -webkit-overflow-scrolling: touch;
       }
 
-      /* Artist Grid Styles */
-      .artist-grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr); /* Mobile: 2 cols */
-        gap: 1rem;
+      /* Artist List */
+      .artist-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
       }
 
-      .artist-card {
+      .artist-row {
+        display: flex;
+        align-items: center;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius);
-        overflow: hidden;
-        position: relative;
-        aspect-ratio: 1; /* Square */
-        display: flex;
-        flex-direction: column;
+        padding: 0.8rem;
         cursor: pointer;
-        transition: transform 0.2s;
+        transition: background 0.2s;
+      }
+      .artist-row:active {
+        background: var(--btn-active);
       }
 
-      .artist-card:active {
-        transform: scale(0.97);
-      }
-
-      .artist-art {
-        flex: 1;
+      .artist-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 3rem;
         font-weight: 700;
-        color: rgba(255, 255, 255, 0.8);
-        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        font-size: 1.2rem;
+        color: rgba(255, 255, 255, 0.9);
+        margin-right: 1rem;
+        flex-shrink: 0;
       }
 
-      .artist-name {
-        padding: 0.8rem;
-        font-weight: 700;
-        font-size: 1rem;
-        text-align: center;
-        background: rgba(0, 0, 0, 0.6);
+      .artist-name-list {
+        font-size: 1.1rem;
+        font-weight: 600;
         color: white;
+        flex: 1;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        position: absolute;
-        bottom: 0;
-        width: 100%;
-        backdrop-filter: blur(4px);
       }
 
-      /* Song List Styles */
-      .song-list-container {
+      .artist-count {
+        font-size: 0.9rem;
+        color: var(--text-dim);
+      }
+
+      /* Song List */
+      #song-view-container {
         display: none;
         flex-direction: column;
       }
-      .song-list-container.active {
+      #song-view-container.active {
         display: flex;
       }
 
@@ -298,7 +354,6 @@
         width: 60px;
         flex-shrink: 0;
       }
-
       .song-info {
         display: flex;
         flex-direction: column;
@@ -309,12 +364,8 @@
         font-weight: 700;
         margin-bottom: 2px;
       }
-      .song-artist {
-        font-size: 0.9rem;
-        color: var(--text-dim);
-      }
 
-      /* --- Toast Notification --- */
+      /* --- Toast --- */
       .toast {
         position: fixed;
         bottom: 2rem;
@@ -327,36 +378,37 @@
         border-radius: 50px;
         font-weight: 700;
         opacity: 0;
-        transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        transition: all 0.3s;
         z-index: 9999;
-        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.5);
       }
       .toast.show {
         transform: translate(-50%, 0);
         opacity: 1;
       }
 
-      /* --- TABLET / DESKTOP RESPONSIVE LAYOUT --- */
+      /* =========================================
+         TABLET & DESKTOP LAYOUT (Split Screen)
+         ========================================= */
       @media (min-width: 768px) {
-        .app-container {
+        .view-container {
+          display: flex;
           flex-direction: row;
+          width: 100%;
+          height: 100%;
         }
 
         .app-header {
-          display: none; /* Hide top header on tablet, use side panel layout */
+          display: none;
         }
 
-        /* Remote Panel (Left) */
         #remote-view {
           position: relative;
           width: 380px;
           flex-shrink: 0;
           border-right: 1px solid var(--border);
           transform: none;
-          visibility: visible;
-          padding: 2rem;
           display: flex;
-          flex-direction: column;
+          z-index: 10;
         }
 
         .remote-title-desktop {
@@ -367,33 +419,30 @@
           font-weight: 800;
           margin-bottom: 2rem;
           letter-spacing: 0.3rem;
+          width: 100%;
         }
 
-        /* Library Panel (Right) */
         #songlist-view {
           position: relative;
           flex: 1;
-          transform: none;
-          visibility: visible;
-          border-left: 1px solid rgba(0, 0, 0, 0.5);
-          display: flex !important; /* Always show on tablet */
-          z-index: 1;
+          transform: none !important;
+          visibility: visible !important;
+          display: flex;
+          z-index: 5;
+          border-left: none;
         }
 
-        /* Adjust Grid for larger screens */
-        .artist-grid {
-          grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-          gap: 1.5rem;
-        }
-
-        /* Hide buttons that toggle views on desktop since both are visible */
         .mobile-only {
           display: none !important;
         }
 
-        .remote-grid {
-          max-width: 100%;
+        #unified-back-btn {
+          display: none;
         }
+        #unified-back-btn.desktop-visible {
+          display: block;
+        }
+
         button {
           font-size: 1.3rem;
           height: 70px;
@@ -413,118 +462,118 @@
   </head>
   <body>
     <div class="app-container">
-      <!-- Mobile Header -->
       <header class="app-header">
         <h1>ENCORE LINK</h1>
       </header>
 
-      <!-- View Container (flexes to fill remaining space) -->
       <div class="view-container">
-        <!-- Remote View (Left on Tablet, Main on Mobile) -->
-        <div id="remote-view" class="view active">
-          <div class="remote-title-desktop">ENCORE</div>
+        <!-- Remote Control Panel -->
+        <div id="remote-view" class="view">
+          <div id="remote-view-content">
+            <div class="remote-title-desktop">ENCORE</div>
 
-          <div class="remote-grid">
-            <!-- Playback Controls (top row, full width) -->
-            <button data-type="stop" data-value="Escape" class="btn-danger">
-              STOP
-            </button>
-            <button
-              data-type="reserve"
-              data-value="Enter"
-              class="btn-primary span-2"
-            >
-              RESERVE
-            </button>
-            <button data-type="toggle_bgv">BGV</button>
-
-            <!-- Numpad (centered, 3x4 grid) -->
-            <div class="numpad-grid" style="grid-column: span 4">
-              <button class="numpad-btn" data-type="digit" data-value="1">
-                1
-              </button>
-              <button class="numpad-btn" data-type="digit" data-value="2">
-                2
-              </button>
-              <button class="numpad-btn" data-type="digit" data-value="3">
-                3
-              </button>
-              <button class="numpad-btn" data-type="digit" data-value="4">
-                4
-              </button>
-              <button class="numpad-btn" data-type="digit" data-value="5">
-                5
-              </button>
-              <button class="numpad-btn" data-type="digit" data-value="6">
-                6
-              </button>
-              <button class="numpad-btn" data-type="digit" data-value="7">
-                7
-              </button>
-              <button class="numpad-btn" data-type="digit" data-value="8">
-                8
-              </button>
-              <button class="numpad-btn" data-type="digit" data-value="9">
-                9
+            <div class="remote-grid">
+              <!-- Transport -->
+              <button data-type="stop" data-value="Escape" class="btn-danger">
+                STOP
               </button>
               <button
-                class="numpad-btn"
-                data-type="backspace"
-                data-value="Backspace"
+                data-type="reserve"
+                data-value="Enter"
+                class="btn-primary span-2"
               >
-                &larr;
+                RESERVE
               </button>
-              <button class="numpad-btn" data-type="digit" data-value="0">
-                0
-              </button>
-              <div></div>
-            </div>
+              <button data-type="toggle_bgv">BGV</button>
 
-            <!-- Key Controls Row -->
-            <div class="numpad-controls-row" style="grid-column: span 4">
-              <button data-type="key_up" data-value="ArrowUp">
-                KEY &uarr;
-              </button>
-              <button data-type="key_down" data-value="ArrowDown">
-                KEY &darr;
-              </button>
-            </div>
-            <!-- Volume Controls Row -->
-            <div class="numpad-controls-row" style="grid-column: span 4">
-              <button data-type="vol_up" data-value="=">VOL &uarr;</button>
-              <button data-type="vol_down" data-value="-">VOL &darr;</button>
-            </div>
+              <!-- Numpad -->
+              <div class="numpad-grid" style="grid-column: span 4">
+                <button class="numpad-btn" data-type="digit" data-value="1">
+                  1
+                </button>
+                <button class="numpad-btn" data-type="digit" data-value="2">
+                  2
+                </button>
+                <button class="numpad-btn" data-type="digit" data-value="3">
+                  3
+                </button>
+                <button class="numpad-btn" data-type="digit" data-value="4">
+                  4
+                </button>
+                <button class="numpad-btn" data-type="digit" data-value="5">
+                  5
+                </button>
+                <button class="numpad-btn" data-type="digit" data-value="6">
+                  6
+                </button>
+                <button class="numpad-btn" data-type="digit" data-value="7">
+                  7
+                </button>
+                <button class="numpad-btn" data-type="digit" data-value="8">
+                  8
+                </button>
+                <button class="numpad-btn" data-type="digit" data-value="9">
+                  9
+                </button>
+                <button
+                  class="numpad-btn"
+                  data-type="backspace"
+                  data-value="Backspace"
+                >
+                  &larr;
+                </button>
+                <button class="numpad-btn" data-type="digit" data-value="0">
+                  0
+                </button>
+                <div></div>
+              </div>
 
-            <!-- Navigation / Extra -->
-            <button
-              class="btn-secondary span-4 mobile-only"
-              id="open-library-btn"
-            >
-              BROWSE SONGLIST
-            </button>
-            <button
-              data-type="yt_search"
-              class="span-4 mobile-only"
-              style="margin-top: 0.5rem"
-            >
-              YOUTUBE SEARCH
-            </button>
+              <!-- Control Rows (Key on Left, Vol on Right) -->
+              <div class="controls-wrapper span-4">
+                <!-- Left Column: Key -->
+                <div class="control-column">
+                  <button data-type="key_up" data-value="ArrowUp">
+                    KEY &uarr;
+                  </button>
+                  <button data-type="key_down" data-value="ArrowDown">
+                    KEY &darr;
+                  </button>
+                </div>
+                <!-- Right Column: Vol -->
+                <div class="control-column">
+                  <button data-type="vol_up" data-value="=">VOL &uarr;</button>
+                  <button data-type="vol_down" data-value="-">
+                    VOL &darr;
+                  </button>
+                </div>
+              </div>
+
+              <!-- Mobile Navigation -->
+              <button
+                class="btn-secondary span-4 mobile-only"
+                id="open-library-btn"
+              >
+                BROWSE SONGLIST
+              </button>
+
+              <!-- YouTube Search -->
+              <button
+                data-type="yt_search"
+                class="span-4"
+                style="margin-top: 0.5rem"
+              >
+                YOUTUBE SEARCH
+              </button>
+            </div>
           </div>
         </div>
 
-        <!-- Song List / Library View (Right on Tablet, Overlay on Mobile) -->
+        <!-- Library Panel -->
         <div id="songlist-view" class="view">
           <div class="library-header">
             <button
-              class="mobile-only"
-              id="close-library-btn"
+              id="unified-back-btn"
               style="width: 50px; font-size: 1.5rem"
-            >
-              &larr;
-            </button>
-            <button
-              id="library-back-btn"
-              style="width: 50px; font-size: 1.5rem; display: none"
             >
               &larr;
             </button>
@@ -532,20 +581,18 @@
               type="text"
               id="library-search"
               class="search-bar"
-              placeholder="Search artists..."
+              placeholder="Search songs or artists..."
             />
           </div>
 
           <div class="library-content">
-            <!-- Artist Grid View -->
             <div id="artist-view-container">
-              <div class="artist-grid" id="artist-grid">
+              <div class="artist-list" id="artist-list">
                 <!-- JS Injected Artists -->
               </div>
             </div>
 
-            <!-- Specific Songs List View -->
-            <div id="song-view-container" class="song-list-container">
+            <div id="song-view-container">
               <h3
                 id="current-artist-name"
                 style="margin: 0 0 1rem 0; color: var(--primary)"
@@ -559,8 +606,8 @@
           </div>
         </div>
 
-        <!-- YouTube Search View (Mobile/Overlay only) -->
-        <div id="search-view" class="view" style="z-index: 3">
+        <!-- YouTube Search Overlay -->
+        <div id="search-view">
           <div class="library-header">
             <button id="close-yt-btn" style="width: 50px">&larr;</button>
             <input
@@ -576,30 +623,45 @@
           <div
             style="
               padding: 2rem;
-              display: grid;
-              gap: 1rem;
-              grid-template-columns: 1fr 1fr;
+              display: flex;
+              flex-direction: column;
+              gap: 1.5rem;
+              height: 100%;
+              max-width: 500px;
+              margin: 0 auto;
+              width: 100%;
+              justify-content: center;
             "
           >
-            <button
-              data-type="nav_up"
-              data-value="ArrowUp"
-              style="height: 100px; font-size: 2rem"
-            >
-              &uarr;
-            </button>
-            <button
-              data-type="nav_down"
-              data-value="ArrowDown"
-              style="height: 100px; font-size: 2rem"
-            >
-              &darr;
-            </button>
+            <!-- Navigation Group (Stacked Top) -->
+            <div style="display: flex; flex-direction: column; gap: 1rem">
+              <button
+                data-type="nav_up"
+                data-value="ArrowUp"
+                style="height: 80px; font-size: 2.5rem"
+              >
+                &uarr;
+              </button>
+              <button
+                data-type="nav_down"
+                data-value="ArrowDown"
+                style="height: 80px; font-size: 2.5rem"
+              >
+                &darr;
+              </button>
+            </div>
+
+            <!-- Action Group (Bottom, Distinct) -->
             <button
               data-type="enter"
               data-value="Enter"
-              class="span-2 btn-primary"
-              style="height: 80px"
+              class="btn-primary"
+              style="
+                height: 100px;
+                font-size: 1.5rem;
+                font-weight: 800;
+                letter-spacing: 2px;
+              "
             >
               SELECT / PLAY
             </button>
@@ -608,7 +670,6 @@
       </div>
     </div>
 
-    <!-- Toast Notification -->
     <div class="toast" id="toast">Song Reserved!</div>
 
     <script src="/socket.io/socket.io.js"></script>
@@ -619,10 +680,14 @@
         // --- State ---
         let fullSongList = [];
         let artistsMap = {};
-        let currentView = "artists";
+
+        let navState = {
+          view: "artists",
+          mobileLibraryOpen: false,
+        };
 
         // --- Elements ---
-        const artistGrid = document.getElementById("artist-grid");
+        const artistListContainer = document.getElementById("artist-list");
         const artistViewContainer = document.getElementById(
           "artist-view-container",
         );
@@ -635,21 +700,19 @@
         );
 
         const librarySearch = document.getElementById("library-search");
-        const libraryBackBtn = document.getElementById("library-back-btn");
+        const unifiedBackBtn = document.getElementById("unified-back-btn");
         const songlistView = document.getElementById("songlist-view");
+
         const searchView = document.getElementById("search-view");
 
-        // --- Socket Connection & Data Request ---
+        // --- Socket Connection ---
         socket.on("connect", () => {
           console.log("Connected to Encore. Requesting song list...");
-          // CRITICAL FIX: Automatically ask the server for the song list on connection
           socket.emit("remote-command", { type: "get_song_list", value: "" });
         });
 
         socket.on("fromRemote", (payload) => {
-          // Handle incoming song list
           if (payload.type === "songlist" && Array.isArray(payload.contents)) {
-            console.log(`Received ${payload.contents.length} songs.`);
             fullSongList = payload.contents;
             processSongList(fullSongList);
           }
@@ -659,65 +722,51 @@
         function processSongList(songs) {
           artistsMap = {};
           songs.forEach((song) => {
-            // Normalize artist name to avoid duplicates like "Abba" vs "ABBA"
             const rawArtist = song.artist || "Unknown Artist";
             const artistKey = rawArtist.trim();
-
-            if (!artistsMap[artistKey]) {
-              artistsMap[artistKey] = [];
-            }
+            if (!artistsMap[artistKey]) artistsMap[artistKey] = [];
             artistsMap[artistKey].push(song);
           });
-
-          // Sort artists alphabetically
           const sortedArtists = Object.keys(artistsMap).sort((a, b) =>
             a.localeCompare(b, undefined, { sensitivity: "base" }),
           );
-
-          renderArtistGrid(sortedArtists);
+          renderArtistList(sortedArtists);
         }
 
-        // --- Rendering: Artist Grid ---
-        function renderArtistGrid(artists) {
-          artistGrid.innerHTML = "";
-
+        // --- Rendering ---
+        function renderArtistList(artists) {
+          artistListContainer.innerHTML = "";
           if (artists.length === 0) {
-            artistGrid.innerHTML =
-              '<div style="grid-column: span 2; text-align: center; color: var(--text-dim); padding: 2rem;">Loading artists or list is empty...</div>';
+            artistListContainer.innerHTML =
+              '<div style="text-align: center; color: var(--text-dim); padding: 2rem;">No matches found.</div>';
             return;
           }
-
           const fragment = document.createDocumentFragment();
-
           artists.forEach((artist) => {
-            const card = document.createElement("div");
-            card.className = "artist-card";
-
-            // Create a deterministic color based on the name
+            const row = document.createElement("div");
+            row.className = "artist-row";
             const color1 = stringToColor(artist);
             const color2 = stringToColor(artist.split("").reverse().join(""));
-            const initial = artist.charAt(0).toUpperCase();
+            const count = artistsMap[artist] ? artistsMap[artist].length : 0;
 
-            card.innerHTML = `
-                    <div class="artist-art" style="background: linear-gradient(135deg, ${color1}, ${color2})">
-                        ${initial}
-                    </div>
-                    <div class="artist-name">${artist}</div>
-                `;
-
-            card.onclick = () => openArtistSongs(artist);
-            fragment.appendChild(card);
+            row.innerHTML = `
+                <div class="artist-avatar" style="background: linear-gradient(135deg, ${color1}, ${color2})">
+                    ${artist.charAt(0).toUpperCase()}
+                </div>
+                <div class="artist-name-list">${artist}</div>
+                <div class="artist-count">${count}</div>
+            `;
+            row.onclick = () => openArtistSongs(artist);
+            fragment.appendChild(row);
           });
-
-          artistGrid.appendChild(fragment);
+          artistListContainer.appendChild(fragment);
         }
 
-        // --- Rendering: Songs ---
         function openArtistSongs(artistName) {
-          currentView = "songs";
+          navState.view = "songs";
           currentArtistLabel.textContent = artistName;
 
-          const songs = artistsMap[artistName];
+          const songs = artistsMap[artistName] || [];
           artistSongsList.innerHTML = "";
 
           songs.forEach((song) => {
@@ -725,54 +774,75 @@
             item.className = "song-item";
             item.innerHTML = `
                     <div class="song-code">${song.code}</div>
-                    <div class="song-info">
-                        <div class="song-title">${song.title}</div>
-                        <!-- We hide the artist name here since we are in that artist's folder -->
-                    </div>
+                    <div class="song-info"><div class="song-title">${song.title}</div></div>
                 `;
             item.onclick = () => reserveSong(song);
             artistSongsList.appendChild(item);
           });
 
-          // Switch UI State
+          // Switch DOM
           artistViewContainer.style.display = "none";
           songViewContainer.classList.add("active");
 
-          // Update Inputs
+          // Update Inputs & Buttons
           librarySearch.value = "";
           librarySearch.placeholder = `Search in ${artistName}...`;
-          libraryBackBtn.style.display = "block";
+
+          // Update Back Button Visibility for Desktop
+          unifiedBackBtn.classList.add("desktop-visible");
         }
 
-        function returnToArtistGrid() {
-          currentView = "artists";
-          artistViewContainer.style.display = "block";
-          songViewContainer.classList.remove("active");
-          libraryBackBtn.style.display = "none";
-          librarySearch.placeholder = "Search artists...";
-          librarySearch.value = "";
+        // --- Navigation Logic ---
 
-          // Reset filter to show all artists
-          renderArtistGrid(
-            Object.keys(artistsMap).sort((a, b) =>
+        function handleBackNavigation() {
+          // Case 1: We are looking at specific songs. Go back to Artist List.
+          if (navState.view === "songs") {
+            navState.view = "artists";
+            artistViewContainer.style.display = "block";
+            songViewContainer.classList.remove("active");
+
+            librarySearch.placeholder = "Search songs or artists...";
+            librarySearch.value = "";
+
+            // Reset search results to full list
+            const sortedArtists = Object.keys(artistsMap).sort((a, b) =>
               a.localeCompare(b, undefined, { sensitivity: "base" }),
-            ),
-          );
+            );
+            renderArtistList(sortedArtists);
+
+            // Hide back button on desktop (since we are at root)
+            unifiedBackBtn.classList.remove("desktop-visible");
+          }
+          // Case 2: We are at Artist List. If mobile, close the library.
+          else if (navState.view === "artists") {
+            if (window.innerWidth < 768) {
+              closeLibrary();
+            } else {
+              // Desktop: Do nothing or clear search
+              librarySearch.value = "";
+              const sorted = Object.keys(artistsMap).sort((a, b) =>
+                a.localeCompare(b, undefined, { sensitivity: "base" }),
+              );
+              renderArtistList(sorted);
+            }
+          }
         }
 
-        // --- View Navigation ---
-        document.getElementById("open-library-btn").onclick = () => {
+        function openLibrary() {
+          navState.mobileLibraryOpen = true;
           songlistView.classList.add("active");
-        };
+        }
 
-        document.getElementById("close-library-btn").onclick = () => {
+        function closeLibrary() {
+          navState.mobileLibraryOpen = false;
           songlistView.classList.remove("active");
-          setTimeout(returnToArtistGrid, 300);
-        };
+          if (navState.view === "songs") handleBackNavigation();
+        }
 
-        libraryBackBtn.onclick = returnToArtistGrid;
+        unifiedBackBtn.onclick = handleBackNavigation;
+        document.getElementById("open-library-btn").onclick = openLibrary;
 
-        // YT Search Toggles
+        // YT Search Logic
         document.querySelector('button[data-type="yt_search"]').onclick =
           () => {
             searchView.classList.add("active");
@@ -788,20 +858,35 @@
         librarySearch.addEventListener("input", (e) => {
           const query = e.target.value.toLowerCase();
 
-          if (currentView === "artists") {
-            const allArtists = Object.keys(artistsMap).sort((a, b) =>
-              a.localeCompare(b, undefined, { sensitivity: "base" }),
-            );
+          if (navState.view === "artists") {
+            const allArtists = Object.keys(artistsMap);
             if (!query) {
-              renderArtistGrid(allArtists);
-            } else {
-              const filtered = allArtists.filter((a) =>
-                a.toLowerCase().includes(query),
+              renderArtistList(
+                allArtists.sort((a, b) =>
+                  a.localeCompare(b, undefined, { sensitivity: "base" }),
+                ),
               );
-              renderArtistGrid(filtered);
+            } else {
+              const matchedArtists = new Set();
+
+              allArtists.forEach((artist) => {
+                if (artist.toLowerCase().includes(query))
+                  matchedArtists.add(artist);
+              });
+
+              fullSongList.forEach((song) => {
+                if (song.title && song.title.toLowerCase().includes(query)) {
+                  const artistKey = song.artist.trim();
+                  if (artistsMap[artistKey]) matchedArtists.add(artistKey);
+                }
+              });
+
+              const results = Array.from(matchedArtists).sort((a, b) =>
+                a.localeCompare(b, undefined, { sensitivity: "base" }),
+              );
+              renderArtistList(results);
             }
           } else {
-            // Filter songs within current artist view
             const songItems = artistSongsList.querySelectorAll(".song-item");
             songItems.forEach((item) => {
               const text = item.innerText.toLowerCase();
@@ -841,9 +926,8 @@
         // --- Helpers ---
         function stringToColor(str) {
           let hash = 0;
-          for (let i = 0; i < str.length; i++) {
+          for (let i = 0; i < str.length; i++)
             hash = str.charCodeAt(i) + ((hash << 5) - hash);
-          }
           const c = (hash & 0x00ffffff).toString(16).toUpperCase();
           return "#" + "00000".substring(0, 6 - c.length) + c;
         }

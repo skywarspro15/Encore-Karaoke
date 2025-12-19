@@ -835,23 +835,27 @@ input[type="range"] {
 }
 
 .notify-box > .notify {
-  background-color: var(--background-lighter);
+  background-color: var(--background-default);
   border: 0.125rem solid var(--current-player);
   border-radius: 0.5rem;
-  padding: 0.75rem 0.8rem;
-  min-width: 18rem;
+  padding: 1rem 1.25rem;
+  min-width: 20rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  backdrop-filter: blur(0.5rem) brightness(0.5) contrast(1.05);
+  backdrop-filter: blur(0.5rem) brightness(0.8) contrast(1.2);
+  box-shadow: 0 0 1rem 0 rgba(0, 0, 0, 0.5);
 }
 .notify-box > .notify .notify-title {
-  font-size: 1.25rem;
-  color: var(--label-lightest);
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--current-player);
+  letter-spacing: 0.05em;
 }
 .notify-box > .notify .notify-description {
-  /* . . . */
-  opacity: 1;
+  font-size: 0.95rem;
+  color: var(--text-default);
+  opacity: 0.9;
 }
 
 .hidden {
@@ -2284,4 +2288,134 @@ input[type="range"]::-moz-range-thumb {
   border-radius: 50%;
   cursor: pointer;
   border: 2px solid #010141;
+}
+
+.post-song-screen-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    180deg,
+    rgba(8, 8, 12, 0.98) 0%,
+    rgba(2, 2, 5, 0.99) 100%
+  );
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+  font-family: "Radio Canada", sans-serif;
+  color: white;
+}
+.score-title-text {
+  font-family: "Rajdhani", sans-serif;
+  font-size: 3.5rem;
+  text-transform: uppercase;
+  letter-spacing: 8px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 2vh;
+  font-weight: 700;
+}
+.score-main-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 6vh;
+}
+.score-display-number {
+  font-family: "Rajdhani", sans-serif;
+  font-size: 16rem;
+  font-weight: 700;
+  line-height: 0.9;
+  color: #fff;
+  text-shadow: 0 0 40px rgba(255, 255, 255, 0.2);
+}
+.rank-display-text {
+  font-family: "Rajdhani", sans-serif;
+  font-size: 6rem;
+  font-weight: 700;
+  margin-top: 10px;
+  text-transform: uppercase;
+  letter-spacing: 5px;
+}
+
+.score-details-grid {
+  display: flex;
+  gap: 6vw;
+  justify-content: center;
+  width: 90%;
+  max-width: 1400px;
+}
+.gauge-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+.gauge-svg-container {
+  position: relative;
+  width: 160px;
+  height: 160px;
+}
+.gauge-svg {
+  transform: rotate(-90deg);
+  width: 100%;
+  height: 100%;
+}
+.gauge-bg-circle {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 8;
+}
+.gauge-fill-circle {
+  fill: none;
+  stroke: var(--g-color);
+  stroke-width: 8;
+  stroke-linecap: round;
+  stroke-dasharray: 283; /* 2 * PI * 45 */
+  stroke-dashoffset: 283;
+  transition: stroke-dashoffset 0.1s linear;
+}
+.gauge-value-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: "Rajdhani", sans-serif;
+  font-size: 3rem;
+  font-weight: 700;
+  color: #fff;
+}
+.gauge-label {
+  font-family: "Rajdhani", sans-serif;
+  font-size: 1.4rem;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 600;
+}
+.score-skip-hint {
+  position: absolute;
+  bottom: 50px;
+  font-family: "Radio Canada", sans-serif;
+  font-size: 1rem;
+  color: rgba(255, 255, 255, 0.3);
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  animation: blink-hint 2s infinite;
+}
+@keyframes blink-hint {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.7;
+  }
 }

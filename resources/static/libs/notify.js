@@ -77,7 +77,7 @@ export default {
 
     document.addEventListener("CherryTree.Ui.ControllerChange", update);
 
-    Sfx.playSfx("deck_ui_toast.wav");
+    // Sfx.playSfx("deck_ui_toast.wav");
 
     let notify = new Html("div")
       .class("notify", "slideIn")

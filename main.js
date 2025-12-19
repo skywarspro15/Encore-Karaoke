@@ -268,6 +268,7 @@ app.whenReady().then(() => {
   // --- START: Added for PeerJS Mic ---
   const playerPeerId = `encore-player-${crypto.randomBytes(8).toString("hex")}`;
   const micSessions = new Map(); // Stores valid, one-time session codes
+  const knownRemotes = {};
 
   // This endpoint is called by the Encore Link remote to get a connection code
   server.get("/mic/initiate", (req, res) => {
@@ -318,6 +319,7 @@ app.whenReady().then(() => {
     if (clientType === "app") {
       console.log("[LINK] Main App connected.");
       socket.join("karaoke-app"); // The app joins a room
+      socket.emit("remotes", knownRemotes);
       socket.on("disconnect", () => {
         console.log("[LINK] Main App disconnected.");
       });
@@ -332,6 +334,14 @@ app.whenReady().then(() => {
 
     if (clientType === "remote") {
       console.log("[LINK] Remote connected.");
+      io.to("karaoke-app").emit("join", {
+        type: clientType,
+        identity: socket.id,
+      });
+      knownRemotes[socket.id] = {
+        connectedAt: new Date(Date.now()).toISOString(),
+        commandsSent: 0,
+      };
       socket.on("remote-command", (data) => {
         console.log("[LINK] Received command from remote:", data);
         io.to("karaoke-app").emit("execute-command", {
@@ -341,6 +351,11 @@ app.whenReady().then(() => {
       });
       socket.on("disconnect", () => {
         console.log("[LINK] Remote disconnected.");
+        io.to("karaoke-app").emit("leave", {
+          type: clientType,
+          identity: socket.id,
+        });
+        delete knownRemotes[socket.id];
       });
       return;
     }

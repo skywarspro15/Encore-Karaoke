@@ -25,6 +25,7 @@ class EncoreController {
       highlightedIndex: -1,
       reservationNumber: "",
       reservationQueue: [],
+      knownRemotes: {},
       volume: config.audioConfig.mix.instrumental.volume,
       videoSyncOffset: config.videoConfig?.syncOffset || 0,
       searchResults: [],
@@ -37,7 +38,6 @@ class EncoreController {
       isTransitioning: false,
       isTypingNumber: false,
       lastPlaybackStatus: null,
-      // NEW: State to track score screen
       isScoreScreenActive: false,
       scoreSkipResolver: null,
     };
@@ -86,7 +86,13 @@ class EncoreController {
     await Promise.all(sfx.map((s) => this.Forte.loadSfx(`/assets/audio/${s}`)));
 
     this.socket = io({ query: { clientType: "app" } });
-    this.socket.on("connect", () => console.log("[LINK] Connected to server."));
+    this.socket.on("connect", () => {
+      console.log("[LINK] Connected to server.");
+    });
+    this.socket.on("remotes", (allRemoteData) => {
+      this.knownRemotes = allRemoteData;
+      console.log("[LINK] Loaded remote data", this.knownRemotes);
+    });
     this.setupSocketListeners();
 
     // try {
@@ -342,76 +348,6 @@ class EncoreController {
   }
 
   buildPostSongScreen() {
-    // Inject Styles: Using SVG strokes for gauges now instead of conic-gradient for reliability
-    if (!document.getElementById("encore-score-styles")) {
-      const style = document.createElement("style");
-      style.id = "encore-score-styles";
-      style.innerHTML = `
-            @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&family=Radio+Canada:wght@400;500&display=swap');
-            
-            .post-song-screen-overlay {
-                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-                background: linear-gradient(180deg, rgba(8, 8, 12, 0.98) 0%, rgba(2, 2, 5, 0.99) 100%);
-                display: flex; flex-direction: column; align-items: center; justify-content: center;
-                z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.4s ease;
-                font-family: 'Radio Canada', sans-serif; color: white;
-            }
-            .score-title-text {
-                font-family: 'Rajdhani', sans-serif; font-size: 3.5rem; text-transform: uppercase;
-                letter-spacing: 8px; color: rgba(255,255,255,0.6); margin-bottom: 2vh; font-weight: 700;
-            }
-            .score-main-group {
-                display: flex; flex-direction: column; align-items: center; justify-content: center;
-                margin-bottom: 6vh;
-            }
-            .score-display-number {
-                font-family: 'Rajdhani', sans-serif; font-size: 16rem; font-weight: 700;
-                line-height: 0.9; color: #fff; text-shadow: 0 0 40px rgba(255,255,255,0.2);
-            }
-            .rank-display-text {
-                font-family: 'Rajdhani', sans-serif; font-size: 6rem; font-weight: 700;
-                margin-top: 10px; text-transform: uppercase; letter-spacing: 5px;
-            }
-            
-            .score-details-grid {
-                display: flex; gap: 6vw; justify-content: center; width: 90%; max-width: 1400px;
-            }
-            .gauge-wrapper {
-                display: flex; flex-direction: column; align-items: center; gap: 20px;
-            }
-            .gauge-svg-container {
-                position: relative; width: 160px; height: 160px;
-            }
-            .gauge-svg {
-                transform: rotate(-90deg); width: 100%; height: 100%;
-            }
-            .gauge-bg-circle {
-                fill: none; stroke: rgba(255,255,255,0.1); stroke-width: 8;
-            }
-            .gauge-fill-circle {
-                fill: none; stroke: var(--g-color); stroke-width: 8; stroke-linecap: round;
-                stroke-dasharray: 283; /* 2 * PI * 45 */
-                stroke-dashoffset: 283;
-                transition: stroke-dashoffset 0.1s linear;
-            }
-            .gauge-value-text {
-                position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-                font-family: 'Rajdhani', sans-serif; font-size: 3rem; font-weight: 700; color: #fff;
-            }
-            .gauge-label {
-                font-family: 'Rajdhani', sans-serif; font-size: 1.4rem; text-transform: uppercase;
-                letter-spacing: 2px; color: rgba(255,255,255,0.5); font-weight: 600;
-            }
-            .score-skip-hint {
-                position: absolute; bottom: 50px; font-family: 'Radio Canada', sans-serif;
-                font-size: 1rem; color: rgba(255,255,255,0.3); text-transform: uppercase;
-                letter-spacing: 3px; animation: blink-hint 2s infinite;
-            }
-            @keyframes blink-hint { 0%, 100% { opacity: 0.3; } 50% { opacity: 0.7; } }
-        `;
-      document.head.appendChild(style);
-    }
-
     this.dom.postSongScreen = new Html("div")
       .classOn("post-song-screen-overlay")
       .appendTo(this.wrapper);
@@ -1618,6 +1554,20 @@ class EncoreController {
   }
 
   setupSocketListeners() {
+    this.socket.on("join", (joinInformation) => {
+      if (joinInformation.type == "remote") {
+        this.state.knownRemotes[joinInformation.identity] = {
+          connectedAt: new Date(Date.now()).toISOString(),
+          commandsSent: 0,
+        };
+        console.log("[LINK] New remote connected.", this.state.knownRemotes);
+        this.infoBar.showTemp("LINK", "A new Remote has connected.", 5000);
+      }
+    });
+    this.socket.on("leave", (leaveInformation) => {
+      delete this.state.knownRemotes[leaveInformation.identity];
+      console.log("[LINK] Remote disconnected.", this.state.knownRemotes);
+    });
     this.socket.on("execute-command", (cmd) => {
       const d = cmd.data;
       switch (d.type) {
@@ -1657,7 +1607,9 @@ class EncoreController {
             this.recorder.toggle();
           break;
         case "toggle_bgv":
-          this.handleBracket("]");
+          if (!this.state.currentSongIsMV) {
+            this.handleBracket("]");
+          }
           break;
         case "yt_search_open":
           if (!this.state.isTransitioning) this.handleYKey();
