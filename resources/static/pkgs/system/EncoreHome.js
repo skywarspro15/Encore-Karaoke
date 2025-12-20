@@ -1018,6 +1018,9 @@ class EncoreController {
     this.Forte.stopTrack();
     this.cleanupPlayerEvents();
     this.dom.countdownDisplay.classOff("visible").text("");
+    this.state.currentSongIsMV = false;
+    this.state.currentSongIsYouTube = false;
+    this.state.currentSongIsMultiplexed = false;
   }
 
   cleanupPlayerEvents() {
@@ -1619,14 +1622,23 @@ class EncoreController {
         case "toggle_bgv":
           if (!this.state.currentSongIsMV) {
             this.handleBracket("]");
+          } else {
+            this.infoBar.showTemp(
+              "BGV",
+              `This function is not available in Music Videos.`,
+              5000,
+            );
           }
           break;
         case "yt_search_open":
           if (!this.state.isTransitioning) this.handleYKey();
           break;
         case "yt_search_close":
-          if (this.state.mode === "yt-search") this.setMode("menu");
-          else this.toggleSearchOverlay(false);
+          if (this.state.mode === "yt-search") {
+            this.setMode("menu");
+          } else {
+            this.toggleSearchOverlay(false);
+          }
           break;
         case "nav_up":
           this.handleNav("up");
