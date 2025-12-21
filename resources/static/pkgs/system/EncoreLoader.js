@@ -4,6 +4,24 @@ let wrapper, Ui, Pid, Sfx;
 let root;
 let statusP;
 
+// Source - https://stackoverflow.com/a
+// Posted by anneb, modified by community. See post 'Timeline' for change history
+// Retrieved 2025-12-22, License - CC BY-SA 4.0
+
+function pathJoin(parts, sep) {
+  const separator = sep || "/";
+  parts = parts.map((part, index) => {
+    if (index) {
+      part = part.replace(new RegExp("^" + separator), "");
+    }
+    if (index !== parts.length - 1) {
+      part = part.replace(new RegExp(separator + "$"), "");
+    }
+    return part;
+  });
+  return parts.join(separator);
+}
+
 const pkg = {
   name: "Encore Loader",
   type: "app",
@@ -12,6 +30,7 @@ const pkg = {
   // Add the loading sequence function
   async startLoadingSequence() {
     let fsSvc = root.Processes.getService("FsSvc").data;
+    let forteSvc = root.Processes.getService("ForteSvc").data;
 
     try {
       const config = await window.desktopIntegration.ipc.invoke("getConfig");
@@ -32,7 +51,20 @@ const pkg = {
         fsSvc.buildSongList(config.libraryPath);
         document.addEventListener(
           "CherryTree.FsSvc.SongList.Ready",
-          async () => {
+          async (e) => {
+            let msgData = e.detail;
+            if (msgData.manifest.additionalContents.soundFont) {
+              statusP.text("Loading sounds...");
+              const url = new URL(`http://127.0.0.1:9864/getFile`);
+
+              let soundFontPath = pathJoin([
+                msgData.libraryPath,
+                msgData.manifest.additionalContents.soundFont,
+              ]);
+
+              url.searchParams.append("path", soundFontPath);
+              await forteSvc.loadSoundFont(url.href);
+            }
             await root.Libs.startPkg("system:EncoreHome", []);
           },
           { once: true },

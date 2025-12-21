@@ -993,13 +993,34 @@ const pkg = {
     },
 
     loadSoundFont: async (url) => {
-      if (!state.playback.synthesizer) return false;
+      if (!audioContext) return false;
+
+      if (state.playback.status !== "stopped") {
+        pkg.data.stopTrack();
+      }
+
+      console.log(`[FORTE SVC] Swapping SoundFont with: ${url}`);
+
       try {
         const response = await fetch(url);
         const arrayBuffer = await response.arrayBuffer();
-        state.playback.synthesizer.loadSoundFont(arrayBuffer);
+
+        if (state.playback.synthesizer) {
+          state.playback.synthesizer = null;
+        }
+
+        state.playback.synthesizer = new Synthetizer(masterGain, arrayBuffer);
+
+        if (state.playback.transpose !== 0) {
+          state.playback.synthesizer.transpose(state.playback.transpose);
+        }
+
+        console.log(
+          "[FORTE SVC] New SoundFont loaded and Synthesizer recreated.",
+        );
         return true;
       } catch (e) {
+        console.error(`[FORTE SVC] Failed to load custom SoundFont: ${url}`, e);
         return false;
       }
     },

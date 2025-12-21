@@ -522,13 +522,19 @@ app.whenReady().then(() => {
           .json({ error: true, error_msg: "This is a directory!" });
       }
 
-      // Changed: allow files with unknown mime types to be served as text
+      // Check for LRC files first
+      if (fPath.endsWith(".lrc")) {
+        return res.sendFile(fPath, {
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+        });
+      }
+
       let mimeType = mime.lookup(fPath);
       if (!mimeType) {
         console.log(
-          `[FILE] Unknown mime type for "${fPath}", defaulting to text/plain`,
+          `[FILE] Unknown mime type for "${fPath}", defaulting to application/octet-stream`,
         );
-        mimeType = "text/plain; charset=utf-8";
+        mimeType = "application/octet-stream";
       }
 
       res.sendFile(fPath, { headers: { "Content-Type": mimeType } });

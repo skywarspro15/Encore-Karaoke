@@ -1,9 +1,10 @@
 // Ensure jsmediatags is loaded, assuming it's available globally.
 const jsmediatags = window.jsmediatags;
 
-// Internal state for the service to hold the cached song list
+// Internal state for the service to hold the cached song list and manifest
 const state = {
   currentLibraryPath: null,
+  currentManifest: null, // Added to store the active library's info
   songList: [],
   isBuilding: false,
 };
@@ -17,6 +18,7 @@ function dispatchSongListReady() {
       detail: {
         libraryPath: state.currentLibraryPath,
         songCount: state.songList.length,
+        manifest: state.currentManifest,
       },
     }),
   );
@@ -46,6 +48,7 @@ const pkg = {
     console.log("[FsSvc] File System Service started.");
     // Reset state on start
     state.currentLibraryPath = null;
+    state.currentManifest = null;
     state.songList = [];
     state.isBuilding = false;
   },
@@ -163,6 +166,20 @@ const pkg = {
       state.isBuilding = true;
       console.log(`[FsSvc] Checking song list for: ${libraryPath}`);
 
+      // --- NEW: Load Manifest immediately when building/loading list ---
+      let loadedManifest = null;
+      try {
+        const manifestContent = await pkg.data.readFile(
+          `${libraryPath}manifest.json`,
+        );
+        if (manifestContent) {
+          loadedManifest = JSON.parse(manifestContent);
+        }
+      } catch (e) {
+        console.warn("[FsSvc] Failed to load manifest for current library", e);
+      }
+      // ----------------------------------------------------------------
+
       const files = await pkg.data.getFolder(libraryPath);
       if (!files) {
         state.isBuilding = false;
@@ -176,14 +193,16 @@ const pkg = {
         .join("|");
       const cachedSignature = await window.localforage.getItem(signatureKey);
 
+      // Check Cache
       if (cachedSignature === currentSignature) {
         const cachedList = await window.localforage.getItem(cacheKey);
         if (cachedList) {
           console.log(
-            `[FsSvc] Cache is fresh. Loaded ${cachedList.length} songs from local storage.`,
+            `[FsSvc] Cache is fresh. Loaded ${cachedList.length} songs.`,
           );
           state.songList = cachedList;
           state.currentLibraryPath = libraryPath;
+          state.currentManifest = loadedManifest; // Set manifest in state
           state.isBuilding = false;
           dispatchSongListReady();
           return true;
@@ -194,12 +213,12 @@ const pkg = {
         "[FsSvc] Cache is stale or missing. Starting full library build...",
       );
       state.currentLibraryPath = libraryPath;
+      state.currentManifest = loadedManifest; // Set manifest in state
       state.songList = [];
 
       const newSongList = [];
       let songCodeCounter = 1;
       const audioExtensions = new Set(["wav", "mp3", "m4a"]);
-      // --- MODIFIED: Added video extensions for lookup ---
       const videoExtensions = new Set(["mp4", "mkv", "webm", "avi"]);
       const allFilenames = new Set(files.map((f) => f.name));
 
@@ -219,35 +238,28 @@ const pkg = {
         const filename = file.name;
         const fullPath = `${libraryPath}${filename}`;
 
-        // --- START: MODIFIED LOGIC FOR MULTIPLEX SUPPORT ---
         const isMultiplexed = filename.toLowerCase().includes(".multiplexed.");
         let basename, extension;
 
-        // Correctly get the final extension regardless of multiplexing
         extension = filename.split(".").pop().toLowerCase();
 
         if (isMultiplexed) {
-          // Remove the final extension AND the ".multiplexed" part to get the base name
           const regex = new RegExp(`\\.multiplexed\\.${extension}$`, "i");
           basename = filename.replace(regex, "");
         } else {
-          // Just remove the final extension
           const lastDotIndex = filename.lastIndexOf(".");
           basename =
             lastDotIndex > -1 ? filename.substring(0, lastDotIndex) : filename;
         }
-        // --- END: MODIFIED LOGIC FOR MULTIPLEX SUPPORT ---
 
-        // --- START: NEW LOGIC TO FIND ASSOCIATED VIDEO FILE ---
         let videoPath = null;
         for (const videoExt of videoExtensions) {
           const potentialVideoName = `${basename}.${videoExt}`;
           if (allFilenames.has(potentialVideoName)) {
             videoPath = `${libraryPath}${potentialVideoName}`;
-            break; // Found a video, no need to check other extensions
+            break;
           }
         }
-        // --- END: NEW LOGIC TO FIND ASSOCIATED VIDEO FILE ---
 
         let songData = null;
         let artist = "Unknown Artist";
@@ -274,8 +286,7 @@ const pkg = {
             if (tags.tags.artist) artist = tags.tags.artist;
           } catch (error) {
             console.warn(
-              `[FsSvc] jsmediatags failed for ${filename}, falling back to filename parsing.`,
-              error.info,
+              `[FsSvc] Tag read failed for ${filename}, using filename.`,
             );
             let parts = title.split(" - ");
             if (parts.length >= 2) {
@@ -300,7 +311,6 @@ const pkg = {
             type: songData.type,
             path: fullPath,
             lrcPath: songData.lrcPath,
-            // --- MODIFIED: Added videoPath to the song object ---
             videoPath: videoPath,
           });
         }
@@ -316,7 +326,6 @@ const pkg = {
 
       await window.localforage.setItem(cacheKey, newSongList);
       await window.localforage.setItem(signatureKey, currentSignature);
-      console.log("[FsSvc] New song list and signature saved to cache.");
 
       state.isBuilding = false;
       dispatchSongListReady();
@@ -329,6 +338,19 @@ const pkg = {
      */
     getSongList: () => {
       return state.songList;
+    },
+
+    /**
+     * [GETTER] Returns the current library path and its parsed manifest info.
+     * Use this to retrieve SoundFonts, BGV lists, and library description.
+     * @returns {object|null} { path: string, manifest: object } or null if no library is loaded.
+     */
+    getLibraryInfo: () => {
+      if (!state.currentLibraryPath) return null;
+      return {
+        path: state.currentLibraryPath,
+        manifest: state.currentManifest,
+      };
     },
   },
 
