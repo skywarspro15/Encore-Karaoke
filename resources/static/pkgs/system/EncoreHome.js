@@ -6,6 +6,24 @@ import { RecorderModule } from "/modules/Recorder.js";
 import { InfoBarModule } from "/modules/InfoBar.js";
 import { ScoreHUDModule } from "/modules/ScoreHUD.js";
 
+// Source - https://stackoverflow.com/a
+// Posted by anneb, modified by community. See post 'Timeline' for change history
+// Retrieved 2025-12-22, License - CC BY-SA 4.0
+
+function pathJoin(parts, sep) {
+  const separator = sep || "/";
+  parts = parts.map((part, index) => {
+    if (index) {
+      part = part.replace(new RegExp("^" + separator), "");
+    }
+    if (index !== parts.length - 1) {
+      part = part.replace(new RegExp(separator + "$"), "");
+    }
+    return part;
+  });
+  return parts.join(separator);
+}
+
 class EncoreController {
   constructor(Root, config) {
     this.Root = Root;
@@ -18,6 +36,7 @@ class EncoreController {
     // --- State Management ---
     this.songList = [];
     this.songMap = new Map();
+    this.libraryInfo = this.FsSvc.getLibraryInfo();
 
     this.state = {
       mode: "menu",
@@ -149,7 +168,21 @@ class EncoreController {
     );
 
     // Start BGV
+    console.log("MANIFEST", this.libraryInfo);
     await this.bgv.loadManifestCategories();
+    let libraryBgvCategories =
+      this.libraryInfo.manifest.additionalContents.bgvCategories;
+    libraryBgvCategories.forEach((category) => {
+      let tempPaths = [];
+      category.BGV_LIST.forEach((vidPath) => {
+        tempPaths.push(pathJoin([this.libraryInfo.path, vidPath]));
+      });
+      this.bgv.addDynamicCategory({
+        BGV_CATEGORY: category.BGV_CATEGORY,
+        BGV_LIST: tempPaths,
+        isAbsolute: true,
+      });
+    });
     const mtvPaths = this.songList
       .filter((s) => s.videoPath)
       .map((s) => s.videoPath);
