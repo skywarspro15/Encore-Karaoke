@@ -13,22 +13,21 @@ export class RecorderModule {
     this.animationFrameId = null;
     this.currentSongInfo = null;
     this.uiRefs = null;
-    this.parentContainer = null; // Container to hold canvas
+    this.parentContainer = null;
 
-    // Track the active stream so we can kill it later
+    // Track the active stream
     this.currentStream = null;
 
-    // OPTIMIZATION: Lowered from 1080p to 720p for CPU saving
+    // 720p 30fps configuration
     this.outputResolution = { width: 1280, height: 720 };
     console.log("[RECORDER] Video Recording feature initialized.");
   }
 
   mount(container) {
-    // OPTIMIZATION: Don't create canvas yet. Just save the container.
+    // Lazy load container ref
     this.parentContainer = container;
   }
 
-  // Helper to init canvas only when needed
   _initCanvas() {
     if (this.canvas) return;
 
@@ -62,7 +61,6 @@ export class RecorderModule {
   start() {
     if (this.isRecording || !this.forteSvc || !this.bgvPlayer) return;
 
-    // LAZY LOAD: Create canvas now
     this._initCanvas();
 
     let audioStream;
@@ -82,10 +80,11 @@ export class RecorderModule {
       return;
     }
 
-    // Capture the stream at 30 FPS for performance
+    // Capture the canvas stream
     const videoStream = this.canvas.captureStream(30);
 
-    // Create the combined stream and SAVE REFERENCE to this.currentStream
+    // Combine streams
+    // NOTE: We take the audio track from Forte, but we must NOT stop it later
     this.currentStream = new MediaStream([
       videoStream.getVideoTracks()[0],
       audioStream.getAudioTracks()[0],
@@ -95,7 +94,7 @@ export class RecorderModule {
     try {
       this.mediaRecorder = new MediaRecorder(this.currentStream, {
         mimeType: "video/webm; codecs=vp9,opus",
-        videoBitsPerSecond: 2500000, // Reduced bitrate for 720p
+        videoBitsPerSecond: 2500000, // 2.5 Mbps for 720p
       });
     } catch (e) {
       console.error("Failed to create MediaRecorder:", e);
@@ -113,8 +112,6 @@ export class RecorderModule {
 
     this.mediaRecorder.onstop = () => {
       const blob = new Blob(this.recordedChunks, { type: "video/webm" });
-
-      // Clear chunks from memory immediately after blob creation
       this.recordedChunks = [];
 
       const url = URL.createObjectURL(blob);
@@ -152,15 +149,20 @@ export class RecorderModule {
       this.animationFrameId = null;
     }
 
-    // Stop the MediaStreamTracks to release CPU/Memory
+    // Cleanup Streams
     if (this.currentStream) {
       this.currentStream.getTracks().forEach((track) => {
-        track.stop();
+        // CRITICAL FIX: Only stop video tracks (canvas capture).
+        // Do NOT stop audio tracks, as they belong to the persistent Forte engine.
+        // Stopping the audio track kills audio output for the rest of the app session.
+        if (track.kind === "video") {
+          track.stop();
+        }
       });
       this.currentStream = null;
     }
 
-    this.mediaRecorder = null; // Help Garbage Collector
+    this.mediaRecorder = null;
     this.infoBar.showDefault();
   }
 
@@ -169,22 +171,22 @@ export class RecorderModule {
     const w = this.canvas.width;
     const h = this.canvas.height;
 
-    // Performance: Use clearRect only if necessary, or rely on full draw
     this.ctx.clearRect(0, 0, w, h);
 
-    // Draw BGV
-    let sourceVideo = this.bgvPlayer.isManualMode
-      ? this.bgvPlayer.activeManualPlayer
-      : this.bgvPlayer.videoElements[this.bgvPlayer.activePlayerIndex];
+    // FIX: Adapt to Single Buffer BGV Player
+    // The new BGV module exposes a single `videoElement`
+    const sourceVideo = this.bgvPlayer.videoElement;
 
     if (sourceVideo && sourceVideo.readyState >= 2 && !sourceVideo.paused) {
+      // Draw video
       this.ctx.drawImage(sourceVideo, 0, 0, w, h);
     } else {
+      // Draw black background if buffering or stopped
       this.ctx.fillStyle = "black";
       this.ctx.fillRect(0, 0, w, h);
     }
 
-    // Draw UI
+    // Draw UI Overlay
     if (this.uiRefs && !this.uiRefs.playerUi.elm.classList.contains("hidden")) {
       const gradient = this.ctx.createLinearGradient(0, h * 0.5, 0, h);
       gradient.addColorStop(0, "rgba(0,0,0,0)");
@@ -195,10 +197,9 @@ export class RecorderModule {
       this.ctx.textAlign = "center";
       this.ctx.textBaseline = "bottom";
 
-      // Relative positioning (percentages) instead of fixed pixels
-      // to support the switch to 720p seamlessly
-      const line1BaseY = h * 0.85; // ~ h - 162px (1080p), ~ h - 108px (720p)
-      const line2BaseY = h * 0.93; // ~ h - 75px (1080p), ~ h - 50px (720p)
+      // Relative positioning logic (720p compatible)
+      const line1BaseY = h * 0.85;
+      const line2BaseY = h * 0.93;
 
       const line1HasRomanized = this.uiRefs.lrcLineDisplay1.elm.querySelector(
         ".lyric-line-romanized",
@@ -207,7 +208,6 @@ export class RecorderModule {
         ".lyric-line-romanized",
       )?.textContent;
 
-      // Adjust for romanized height (approx 4% of screen height)
       const romOffset = h * 0.04;
 
       const line1Y = line1HasRomanized
@@ -223,9 +223,8 @@ export class RecorderModule {
       if (
         this.uiRefs.scoreDisplay.elm.parentElement.classList.contains("visible")
       ) {
-        // Scaled fonts
-        const bigFont = `${Math.floor(h * 0.04)}px`; // ~43px at 1080p
-        const smallFont = `${Math.floor(h * 0.015)}px`; // ~16px at 1080p
+        const bigFont = `${Math.floor(h * 0.04)}px`;
+        const smallFont = `${Math.floor(h * 0.015)}px`;
 
         this.ctx.font = `bold ${bigFont} Rajdhani, sans-serif`;
         this.ctx.fillStyle = "#89CFF0";
@@ -244,7 +243,7 @@ export class RecorderModule {
         maxWidth = w * 0.4,
         padding = 25;
 
-      const boxHeight = h * 0.11; // ~120px at 1080p
+      const boxHeight = h * 0.11;
 
       this.ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
       this.ctx.beginPath();
@@ -257,9 +256,8 @@ export class RecorderModule {
       );
       this.ctx.fill();
 
-      // Scaled Fonts
-      const titleSize = `${Math.floor(h * 0.044)}px`; // ~48px
-      const artistSize = `${Math.floor(h * 0.03)}px`; // ~32px
+      const titleSize = `${Math.floor(h * 0.044)}px`;
+      const artistSize = `${Math.floor(h * 0.03)}px`;
 
       this.ctx.font = `bold ${titleSize} Rajdhani, sans-serif`;
       this.ctx.fillStyle = "white";
@@ -286,8 +284,6 @@ export class RecorderModule {
     const isActive = element.classList.contains("active");
     const defaultOpacity = element.classList.contains("next") ? 0.5 : 0.4;
 
-    // Use pixel font sizes relative to height (h) to maintain look on 720p
-    // 4.5rem ~ 72px on standard 16px base -> 72/1080 ~ 0.066
     const mainFontSize = `${Math.floor(h * 0.066)}px`;
     const subFontSize = `${Math.floor(h * 0.022)}px`;
 
@@ -297,7 +293,7 @@ export class RecorderModule {
       : `rgba(255, 255, 255, ${defaultOpacity})`;
     if (isActive) {
       this.ctx.strokeStyle = "#010141";
-      this.ctx.lineWidth = h * 0.01; // Scale outline width
+      this.ctx.lineWidth = h * 0.01;
       this.ctx.lineJoin = "round";
       this.ctx.strokeText(originalEl.textContent, this.canvas.width / 2, y);
     }

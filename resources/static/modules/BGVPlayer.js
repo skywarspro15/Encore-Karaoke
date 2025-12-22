@@ -2,49 +2,70 @@ import Html from "/libs/html.js";
 
 export class BGVModule {
   constructor() {
-    this.videoElements = [];
+    this.videoElement = null; // Single video element
     this.playlist = [];
     this.currentIndex = 0;
-    this.activePlayerIndex = 0;
     this.container = null;
     this.categories = [];
     this.selectedCategory = "Auto";
     this.isManualMode = false;
     this.activeManualPlayer = null;
-    this.FADE_DURATION = 1200;
-    this.PRELOAD_DELAY = 500;
     this.PORT = 9864;
-    console.log("[BGV] BGV Player initialized.");
+
+    // Performance settings
+    this.transitionTimeout = null;
+    console.log(
+      "[BGV] BGV Player initialized (Single Buffer / Performance Mode).",
+    );
   }
 
   mount(container) {
     this.container = container;
-    for (let i = 0; i < 2; i++) {
-      const videoEl = new Html("video")
-        .attr({
-          muted: true,
-          autoplay: false,
-          playsInline: true,
-          defaultMuted: true,
-        })
-        .styleJs({
-          position: "absolute",
-          top: "0",
-          left: "0",
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          opacity: i === 0 ? "1" : "0",
-          transform: "scale(1.01)",
-          transition: `opacity ${this.FADE_DURATION}ms ease-in-out`,
-          willChange: "opacity",
-        })
-        .appendTo(this.container);
-      const elm = videoEl.elm;
-      elm.volume = 0;
-      elm.addEventListener("volumechange", () => (elm.volume = 0));
-      this.videoElements.push(elm);
-    }
+
+    // Set container background to black to hide loading glitches
+    this.container.styleJs({
+      backgroundColor: "#000",
+      overflow: "hidden",
+    });
+
+    // Create ONLY ONE video element
+    this.videoElement = new Html("video")
+      .attr({
+        muted: true,
+        autoplay: false,
+        playsInline: true,
+        defaultMuted: true,
+        preload: "auto",
+      })
+      .styleJs({
+        position: "absolute",
+        top: "0",
+        left: "0",
+        width: "100%",
+        height: "100%",
+        objectFit: "cover",
+        opacity: "0", // Start hidden until ready
+        transition: "opacity 0.5s ease-in-out", // Smooth entry
+        willChange: "opacity", // Optimize compositing
+        transform: "translateZ(0)", // Force GPU layer
+      })
+      .appendTo(this.container).elm;
+
+    // Ensure volume is always 0
+    this.videoElement.volume = 0;
+    this.videoElement.addEventListener(
+      "volumechange",
+      () => (this.videoElement.volume = 0),
+    );
+
+    // Handle Video End -> Next
+    this.videoElement.onended = () => this.playNext();
+
+    // Handle Errors (skip corrupt files)
+    this.videoElement.onerror = (e) => {
+      console.warn("[BGV] Video error, skipping:", e);
+      this.playNext();
+    };
   }
 
   async loadManifestCategories() {
@@ -91,7 +112,7 @@ export class BGVModule {
     }
 
     this.playlist = allVideos;
-    // Shuffle
+    // Fisher-Yates Shuffle
     for (let i = this.playlist.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [this.playlist[i], this.playlist[j]] = [
@@ -99,23 +120,10 @@ export class BGVModule {
         this.playlist[i],
       ];
     }
-    await this.cleanStop();
+
+    this.stop();
     this.currentIndex = 0;
     this.start();
-  }
-
-  async cleanStop() {
-    this.videoElements.forEach((vid) => {
-      vid.onended = null;
-      vid.pause();
-    });
-    await new Promise((resolve) => setTimeout(resolve, this.FADE_DURATION));
-    this.videoElements.forEach((vid) => {
-      vid.removeAttribute("src");
-      vid.load();
-      vid.style.opacity =
-        vid === this.videoElements[this.activePlayerIndex] ? "1" : "0";
-    });
   }
 
   cycleCategory(direction) {
@@ -134,59 +142,83 @@ export class BGVModule {
 
   start() {
     if (this.isManualMode || this.playlist.length === 0) return;
-    const activePlayer = this.videoElements[this.activePlayerIndex];
-    const preloadPlayer = this.videoElements[1 - this.activePlayerIndex];
-    activePlayer.loop = false;
-    preloadPlayer.loop = false;
-    activePlayer.src = this.playlist[this.currentIndex];
-    activePlayer.play().catch(console.error);
-    activePlayer.onended = () => this.playNext();
-    this.currentIndex = (this.currentIndex + 1) % this.playlist.length;
-    setTimeout(() => {
-      if (this.isManualMode) return;
-      preloadPlayer.src = this.playlist[this.currentIndex];
-      preloadPlayer.load();
-    }, this.PRELOAD_DELAY);
+    this._playUrl(this.playlist[this.currentIndex]);
   }
 
   playNext() {
-    if (this.isManualMode) return;
-    const currentPlayer = this.videoElements[this.activePlayerIndex];
-    const nextPlayer = this.videoElements[1 - this.activePlayerIndex];
-    nextPlayer.play().catch(console.error);
-    setTimeout(() => {
-      currentPlayer.style.opacity = "0";
-      nextPlayer.style.opacity = "1";
-    }, 50);
-    this.activePlayerIndex = 1 - this.activePlayerIndex;
-    nextPlayer.onended = () => this.playNext();
-    setTimeout(() => {
-      if (this.isManualMode) return;
-      this.currentIndex = (this.currentIndex + 1) % this.playlist.length;
-      currentPlayer.src = this.playlist[this.currentIndex];
-      currentPlayer.load();
-    }, this.FADE_DURATION + this.PRELOAD_DELAY);
+    if (this.isManualMode || this.playlist.length === 0) return;
+
+    // Move index
+    this.currentIndex = (this.currentIndex + 1) % this.playlist.length;
+
+    // Simple fade out - switch - fade in logic
+    // This allows the decoder to fully stop the previous file before starting the next
+    this.videoElement.style.opacity = "0";
+
+    if (this.transitionTimeout) clearTimeout(this.transitionTimeout);
+
+    this.transitionTimeout = setTimeout(() => {
+      this._playUrl(this.playlist[this.currentIndex]);
+    }, 500); // 500ms black gap to ensure buffer flush
+  }
+
+  _playUrl(url) {
+    const v = this.videoElement;
+
+    // One-time listener for when data is ready
+    const onCanPlay = () => {
+      v.play()
+        .then(() => {
+          v.style.opacity = "1";
+        })
+        .catch((e) => console.error("[BGV] Play failed", e));
+      v.removeEventListener("canplay", onCanPlay);
+    };
+
+    v.addEventListener("canplay", onCanPlay);
+    v.src = url;
+    v.load();
   }
 
   async playSingleVideo(url) {
     this.isManualMode = true;
-    await this.cleanStop();
-    const activePlayer = this.videoElements[this.activePlayerIndex];
-    activePlayer.src = url;
-    activePlayer.load();
-    activePlayer.style.opacity = "1";
-    this.activeManualPlayer = activePlayer;
-    return activePlayer;
+    this.activeManualPlayer = this.videoElement;
+    this.videoElement.onended = null; // Stop looping playlist
+
+    // For manual mode (MTV), we want immediate playback
+    this.videoElement.style.opacity = "0";
+    this.videoElement.src = url;
+    this.videoElement.load();
+
+    await new Promise((resolve) => {
+      const onCanPlay = () => {
+        this.videoElement.style.opacity = "1";
+        this.videoElement.removeEventListener("canplay", onCanPlay);
+        resolve();
+      };
+      this.videoElement.addEventListener("canplay", onCanPlay);
+    });
+
+    return this.videoElement;
   }
 
   async resumePlaylist() {
     if (!this.isManualMode) return;
     this.isManualMode = false;
     this.activeManualPlayer = null;
-    await this.updatePlaylistForCategory();
+    this.videoElement.onended = () => this.playNext();
+
+    // Resume current index
+    this.start();
   }
 
   stop() {
-    this.cleanStop().catch(console.error);
+    if (this.videoElement) {
+      this.videoElement.pause();
+      this.videoElement.removeAttribute("src");
+      this.videoElement.load(); // Force buffer flush
+      this.videoElement.style.opacity = "0";
+    }
+    if (this.transitionTimeout) clearTimeout(this.transitionTimeout);
   }
 }
