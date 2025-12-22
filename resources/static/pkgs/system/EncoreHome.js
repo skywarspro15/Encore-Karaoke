@@ -403,9 +403,7 @@ class EncoreController {
     });
 
     // --- Player UI ---
-    this.dom.introCard = new Html("div")
-      .classOn("intro-card")
-      .appendTo(this.dom.playerUi);
+    this.dom.introCard = new Html("div").classOn("intro-card").appendTo("body");
     this.dom.introTitle = new Html("div")
       .classOn("intro-card-title")
       .appendTo(this.dom.introCard);
