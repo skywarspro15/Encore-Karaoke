@@ -71,6 +71,7 @@ class EncoreController {
         songMap: this.songMap,
       }),
       () => (this.recorder ? this.recorder.isRecording : false),
+      (s) => this.getFormatInfo(s), // Pass format helper to InfoBar
     );
     this.recorder = new RecorderModule(this.Forte, this.bgv, this.infoBar);
 
@@ -1481,8 +1482,16 @@ class EncoreController {
   _updateReservationUI(isTemp) {
     const displayCode = this.state.reservationNumber.padStart(5, "0");
     const song = this.songMap.get(displayCode);
+
+    // Generate Badge
+    let fmtBadge = "";
+    if (song) {
+      const fmt = this.getFormatInfo(song);
+      fmtBadge = `<span class="format-badge" style="background-color: ${fmt.color}">${fmt.label}</span>`;
+    }
+
     let songInfo = song
-      ? `<span class="info-bar-title">${song.title}</span><span class="info-bar-artist">- ${song.artist}</span>`
+      ? `${fmtBadge} <span class="info-bar-title">${song.title}</span><span class="info-bar-artist">- ${song.artist}</span>`
       : this.state.reservationNumber.length === 5
       ? `<span style="opacity: 0.5;">No song found.</span>`
       : "";
@@ -1539,7 +1548,16 @@ class EncoreController {
         const codeSpan = song.code
           ? `<span class="info-bar-code">${song.code}</span>`
           : `<span class="info-bar-code is-youtube">YT</span>`;
-        this.infoBar.showTemp("RESERVED", `${codeSpan} ${song.title}`, 4000);
+
+        // Generate Badge
+        const fmt = this.getFormatInfo(song);
+        const fmtBadge = `<span class="format-badge" style="background-color: ${fmt.color}">${fmt.label}</span>`;
+
+        this.infoBar.showTemp(
+          "RESERVED",
+          `${codeSpan} ${fmtBadge} <span class="info-bar-title">${song.title}</span>`,
+          4000,
+        );
         this.toggleSearchOverlay(false);
       } else if (this.state.reservationNumber) {
         const song = this.songMap.get(

@@ -1,9 +1,10 @@
 import Html from "/libs/html.js";
 
 export class InfoBarModule {
-  constructor(stateProvider, recorderCheck) {
-    this.getState = stateProvider; // Function returning { reservationQueue, songMap }
-    this.checkRecording = recorderCheck; // Function returning bool
+  constructor(stateProvider, recorderCheck, formatProvider) {
+    this.getState = stateProvider;
+    this.checkRecording = recorderCheck;
+    this.getFormatInfo = formatProvider; // Store the callback
     this.bar = null;
     this.labelEl = null;
     this.contentEl = null;
@@ -65,9 +66,17 @@ export class InfoBarModule {
       const codeSpan = nextSong.code
         ? `<span class="info-bar-code">${nextSong.code}</span>`
         : `<span class="info-bar-code is-youtube">YT</span>`;
+
+      // Generate Badge using the callback
+      let fmtBadge = "";
+      if (this.getFormatInfo) {
+        const fmt = this.getFormatInfo(nextSong);
+        fmtBadge = `<span class="format-badge" style="background-color: ${fmt.color}">${fmt.label}</span>`;
+      }
+
       this.show(
         "UP NEXT",
-        `${codeSpan} <span class="info-bar-title">${nextSong.title}</span> <span class="info-bar-artist">- ${nextSong.artist}${extra}</span>`,
+        `${codeSpan} ${fmtBadge} <span class="info-bar-title">${nextSong.title}</span> <span class="info-bar-artist">- ${nextSong.artist}${extra}</span>`,
       );
       this.showBar();
     } else {
