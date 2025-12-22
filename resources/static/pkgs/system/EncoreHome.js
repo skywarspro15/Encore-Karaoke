@@ -114,14 +114,6 @@ class EncoreController {
     });
     this.setupSocketListeners();
 
-    // try {
-    //   const chainRes = await fetch("/pkgs/chains/defaultVocalChain.json");
-    //   const chain = await chainRes.json();
-    //   await this.Forte.loadVocalChain(chain);
-    // } catch (e) {
-    //   console.error("[Encore] Vocal chain load failed", e);
-    // }
-
     // Load Songs
     this.songList = this.FsSvc.getSongList();
     this.songMap = new Map(this.songList.map((s) => [s.code, s]));
@@ -156,7 +148,6 @@ class EncoreController {
       playerUi: this.dom.playerUi,
       lrcLineDisplay1: this.dom.lrcLineDisplay1,
       lrcLineDisplay2: this.dom.lrcLineDisplay2,
-      progressBar: this.dom.progressBar,
       scoreDisplay: this.scoreHud.scoreDisplay,
     });
 
@@ -202,10 +193,6 @@ class EncoreController {
     }, 100);
   }
 
-  /**
-   * Helper to get format badge details based on song data.
-   * Colors provided: MTV: 2F6CD1, RS: B02FD1, MIDI: D12F9E, MP: 2FD147, YT: D12F2F
-   */
   getFormatInfo(song) {
     const colors = {
       MTV: "#2F6CD1",
@@ -241,7 +228,6 @@ class EncoreController {
       return { label: "MIDI", color: colors.MIDI };
     }
 
-    // 5. Default to RealSound (Audio + LRC)
     return { label: "RS", color: colors.RealSound };
   }
 
@@ -270,10 +256,10 @@ class EncoreController {
       .classOn("format-indicator")
       .styleJs({
         position: "absolute",
-        top: "calc(2rem + 50px + 1rem)", // Info Bar top (2rem) + Height (~50px) + Gap (1rem)
+        top: "calc(2rem + 50px + 1rem)",
         left: "3rem",
-        width: "6.7rem",
-        height: "6.7rem",
+        width: "6.5rem",
+        height: "6.5rem",
         backgroundSize: "contain",
         backgroundRepeat: "no-repeat",
         backgroundPosition: "center",
@@ -332,10 +318,13 @@ class EncoreController {
     );
 
     this.songItemElements = [];
+
+    // OPTIMIZATION: Use DocumentFragment
+    const listFragment = document.createDocumentFragment();
+
     this.songList.forEach((song, index) => {
-      const item = new Html("div")
-        .classOn("song-item")
-        .appendTo(this.dom.songListContainer);
+      // Create the item disconnected from DOM initially
+      const item = new Html("div").classOn("song-item");
       new Html("div").classOn("song-item-code").text(song.code).appendTo(item);
 
       const fmt = this.getFormatInfo(song);
@@ -355,6 +344,7 @@ class EncoreController {
         .classOn("song-item-artist")
         .text(song.artist)
         .appendTo(item);
+
       item.on("click", () => this.startPlayer(song));
       item.on("mouseover", () => {
         if (this.state.mode === "menu" && !this.state.isTypingNumber) {
@@ -363,7 +353,13 @@ class EncoreController {
         }
       });
       this.songItemElements.push(item);
+
+      // Append raw element to fragment
+      listFragment.appendChild(item.elm);
     });
+
+    // Single DOM insertion
+    this.dom.songListContainer.elm.appendChild(listFragment);
 
     // --- Bottom Actions ---
     const actions = new Html("div")
@@ -443,13 +439,6 @@ class EncoreController {
     this.dom.midiLineDisplay2 = new Html("div")
       .classOn("lyric-line", "midi-lyric-line", "next")
       .appendTo(this.dom.midiContainer);
-
-    this.dom.playerProgress = new Html("div")
-      .classOn("player-progress")
-      .appendTo(bottom);
-    this.dom.progressBar = new Html("div")
-      .classOn("progress-bar")
-      .appendTo(this.dom.playerProgress);
   }
 
   buildPostSongScreen() {
@@ -522,7 +511,6 @@ class EncoreController {
         .appendTo(svgContainer);
       new Html("div").classOn("gauge-label").text(label).appendTo(wrap);
 
-      // Return raw SVG element for circle to avoid invalid element error in Html class
       return { circle: fillCircle, text: valText };
     };
 
@@ -727,7 +715,6 @@ class EncoreController {
           .text(res.code)
           .appendTo(item);
 
-        // Modified Title Row
         const titleRow = new Html("div").classOn("search-title").appendTo(info);
 
         new Html("span")
@@ -761,7 +748,6 @@ class EncoreController {
           .styleJs({ display: "flex", alignItems: "center" })
           .appendTo(info);
 
-        // YouTube Badge (using helper logic, though we know it's YT)
         new Html("span")
           .classOn("format-badge")
           .text(fmt.label)
@@ -772,8 +758,6 @@ class EncoreController {
           .classOn("search-title")
           .text(res.title)
           .appendTo(titleC);
-
-        // Removed the old "search-youtube-badge" span here since we added the unified format badge above
 
         new Html("div")
           .classOn("search-channel")
@@ -805,8 +789,8 @@ class EncoreController {
 
     // Reset Visuals
     this.dom.countdownDisplay.classOff("visible").text("");
-    this.countdownTargetTime = null; // FIX: Clear leftover countdown target
-    this.lastCountdownTick = null; // FIX: Clear leftover tick state
+    this.countdownTargetTime = null;
+    this.lastCountdownTick = null;
 
     this.dom.lrcLineDisplay1.clear().classOff("active", "next");
     this.dom.lrcLineDisplay2.clear().classOff("active", "next");
@@ -857,7 +841,6 @@ class EncoreController {
       });
       this.dom.lrcContainer.classOn("hidden");
       this.dom.midiContainer.classOn("hidden");
-      this.dom.playerProgress.classOn("hidden");
 
       this.dom.formatIndicator.styleJs({
         backgroundImage: 'url("/assets/img/icons/yt.png")',
@@ -881,7 +864,6 @@ class EncoreController {
       this.dom.bgvContainer.classOff("hidden");
       this.dom.ytContainer.classOn("hidden");
       this.dom.ytIframe.attr({ src: "" });
-      this.dom.playerProgress.classOff("hidden");
 
       const trackUrl = new URL("http://127.0.0.1:9864/getFile");
       trackUrl.searchParams.append("path", song.path);
@@ -948,19 +930,10 @@ class EncoreController {
       let displayableSyllableIndex = 0;
 
       for (const syllableText of pbState.decodedLyrics) {
-        // NOTE: We check specifically for the New Line characters to handle line breaks,
-        // but we rely on the clean text for rendering.
-        // If cleanText matches exactly what Forte outputs (empty string for just \n),
-        // we stay in sync with the event dispatcher.
-
-        // Check for Prefix Newline (breaks BEFORE text)
         const startsWithNewLine = /^[\r\n\/\\\\]/.test(syllableText);
-        // Check for Suffix Newline (breaks AFTER text)
         const endsWithNewLine = /[\r\n\/\\\\]$/.test(syllableText);
-
         const cleanText = syllableText.replace(/[\r\n\/\\]/g, "");
 
-        // 1. Handle Prefix Newline
         if (startsWithNewLine && currentLineSyllables.length > 0) {
           lines.push(currentLineSyllables);
           currentLineSyllables = [];
@@ -979,9 +952,6 @@ class EncoreController {
           displayableSyllableIndex++;
         }
 
-        // 2. Handle Suffix Newline
-        // Only trigger if we added text (so cleanText is not empty), otherwise a standalone \r
-        // (which starts and ends with \r) would trigger double line breaks.
         if (endsWithNewLine && cleanText && currentLineSyllables.length > 0) {
           lines.push(currentLineSyllables);
           currentLineSyllables = [];
@@ -1031,7 +1001,6 @@ class EncoreController {
         if (index >= allSyllables.length) return;
         const activeSyllable = allSyllables[index];
 
-        // Safety check: Ensure the text from Forte matches the text in Encore
         if (text && text !== activeSyllable.text) {
           console.warn(
             `[Encore] Lyric Mismatch! Forte: "${text}", Encore: "${activeSyllable.text}" at index ${index}`,
@@ -1106,10 +1075,7 @@ class EncoreController {
   setupTimeUpdate(mvPlayer) {
     let currentLrcIndex = -1;
     this.boundTimeUpdate = (e) => {
-      const { currentTime, duration } = e.detail;
-      this.dom.progressBar.styleJs({
-        width: `${(currentTime / duration) * 100}%`,
-      });
+      const { currentTime } = e.detail;
 
       // MV Sync logic
       if (mvPlayer) {
@@ -1140,6 +1106,7 @@ class EncoreController {
       // LRC Logic
       if (this.parsedLrc && this.parsedLrc.length) {
         let newIdx = -1;
+        // Optimization: For large LRCs, backward search is okay, but ensure no DOM trashing
         for (let i = this.parsedLrc.length - 1; i >= 0; i--) {
           if (currentTime >= this.parsedLrc[i].time) {
             newIdx = i;
