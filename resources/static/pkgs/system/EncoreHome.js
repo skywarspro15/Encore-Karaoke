@@ -222,6 +222,25 @@ class EncoreController {
       .classOn("player-ui", "hidden")
       .appendTo(this.wrapper);
 
+    // --- Format Indicator ---
+    this.dom.formatIndicator = new Html("div")
+      .classOn("format-indicator")
+      .styleJs({
+        position: "absolute",
+        top: "calc(2rem + 50px + 1rem)", // Info Bar top (2rem) + Height (~50px) + Gap (1rem)
+        left: "3rem",
+        width: "6.7rem",
+        height: "6.7rem",
+        backgroundSize: "contain",
+        backgroundRepeat: "no-repeat",
+        backgroundPosition: "center",
+        zIndex: "20",
+        opacity: "0",
+        transition: "opacity 0.3s ease",
+        pointerEvents: "none",
+      })
+      .appendTo(this.wrapper);
+
     // --- Post Song Screen ---
     this.buildPostSongScreen();
 
@@ -717,6 +736,7 @@ class EncoreController {
     this.dom.midiLineDisplay2.clear().classOff("active", "next");
     this.scoreHud.hide();
     this.dom.introCard.classOff("visible");
+    this.dom.formatIndicator.styleJs({ opacity: "0" });
 
     // Fix: Explicitly reset the multiplex flag so setMode doesn't show the piano roll
     this.state.currentSongIsMultiplexed = false;
@@ -760,6 +780,12 @@ class EncoreController {
       this.dom.lrcContainer.classOn("hidden");
       this.dom.midiContainer.classOn("hidden");
       this.dom.playerProgress.classOn("hidden");
+
+      this.dom.formatIndicator.styleJs({
+        backgroundImage: 'url("/assets/img/icons/yt.png")',
+        opacity: "1",
+      });
+
       this.state.isTransitioning = false;
     } else {
       let mvPlayer = null;
@@ -785,6 +811,18 @@ class EncoreController {
 
       const pbState = this.Forte.getPlaybackState();
       this.state.currentSongIsMultiplexed = pbState.isMultiplexed;
+
+      // Determine Format Icon
+      let icon = "rs.png"; // Default RealSound
+      if (this.state.currentSongIsMV) icon = "mtv.png";
+      else if (this.state.currentSongIsMultiplexed) icon = "mp.png";
+      else if (pbState.isMidi) icon = "midi.png";
+
+      this.dom.formatIndicator.styleJs({
+        backgroundImage: `url("/assets/img/icons/${icon}")`,
+        opacity: "1",
+      });
+
       if (this.state.currentSongIsMultiplexed) {
         this.scoreHud.show(0);
         this.Forte.togglePianoRollVisibility(true);
@@ -1078,6 +1116,7 @@ class EncoreController {
     this.Forte.stopTrack();
     this.cleanupPlayerEvents();
     this.dom.countdownDisplay.classOff("visible").text("");
+    this.dom.formatIndicator.styleJs({ opacity: "0" });
     this.state.currentSongIsMV = false;
     this.state.currentSongIsYouTube = false;
     this.state.currentSongIsMultiplexed = false;

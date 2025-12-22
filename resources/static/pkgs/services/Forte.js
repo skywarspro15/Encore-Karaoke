@@ -693,130 +693,6 @@ const pkg = {
     console.log("Starting Forte Sound Engine Service for Encore.");
     root = Root;
 
-    // 1. Inject UI Styles
-    toastStyleElement = new Html("style")
-      .text(
-        `
-        .forte-toast {
-            position: fixed;
-            top: 2rem;
-            left: 2rem;
-            background: rgba(0,0,0,0.7);
-            border: 1px solid rgba(255,255,255,0.3);
-            border-radius: 0.5rem;
-            padding: 0.6rem 1.2rem;
-            color: #FFD700;
-            font-family: 'Rajdhani', sans-serif;
-            font-weight: 700;
-            font-size: 1rem;
-            letter-spacing: 0.1rem;
-            z-index: 200000;
-            opacity: 0;
-            transform: translateX(-20px);
-            transition: opacity 0.3s ease, transform 0.3s ease;
-            pointer-events: none;
-            will-change: opacity, transform;
-        }
-        .forte-toast.visible {
-            opacity: 1;
-            transform: translateX(0);
-        }
-        .forte-piano-roll-container {
-            position: fixed;
-            bottom: 65%;
-            left: 0;
-            width: 100%;
-            height: 150px;
-            background: rgba(0, 0, 0, 0.4);
-            border-top: 1px solid rgba(255, 255, 255, 0.15);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.15);
-            overflow: hidden;
-            z-index: 14;
-            opacity: 0;
-            transition: opacity 0.5s ease;
-            pointer-events: none;
-            will-change: opacity;
-        }
-        .forte-piano-roll-container.visible {
-            opacity: 1;
-        }
-        .forte-piano-roll-playhead {
-            position: absolute;
-            left: 50%;
-            top: 0;
-            bottom: 0;
-            width: 3px;
-            background: #FFD700;
-            box-shadow: 0 0 10px #FFD700;
-            transform: translateX(-50%);
-            z-index: 3;
-        }
-        .forte-piano-roll-track {
-            position: absolute;
-            top: 0;
-            left: 50%;
-            height: 100%;
-            will-change: transform;
-            z-index: 1;
-        }
-        .forte-piano-note {
-            position: absolute;
-            height: 8px;
-            background-color: #89CFF0;
-            border-radius: 4px;
-            border: 1px solid rgba(1,1,65,0.8);
-            box-sizing: border-box;
-            transform: translateY(-50%);
-            /* Removed transition for better performance during scrolling/rendering */
-        }
-        .forte-piano-note.hit {
-            background-color: #39FF14;
-            box-shadow: 0 0 8px #39FF14;
-        }
-        .forte-piano-roll-user-pitch {
-            position: absolute;
-            left: 45%;
-            width: 10%;
-            height: 4px;
-            background: #f7b733;
-            border-radius: 2px;
-            box-shadow: 0 0 8px #f7b733;
-            z-index: 2;
-            opacity: 0;
-            transition: top 0.05s linear, opacity 0.1s linear;
-            transform: translateY(-50%);
-            will-change: top, opacity;
-        }
-        .forte-score-reason {
-            position: fixed;
-            bottom: calc(65% + 150px);
-            left: 50%;
-            transform: translate(-50%, 20px);
-            font-family: 'Rajdhani', sans-serif;
-            font-size: 2.5rem;
-            font-weight: 900;
-            letter-spacing: 0.1em;
-            text-shadow: 2px 2px 8px rgba(0,0,0,0.8);
-            -webkit-text-stroke: 1px #000;
-            paint-order: stroke fill;
-            z-index: 20;
-            opacity: 0;
-            transition: opacity 0.3s ease, transform 0.3s ease;
-            pointer-events: none;
-            will-change: opacity, transform;
-        }
-        .forte-score-reason.visible {
-            opacity: 1;
-            transform: translate(-50%, 0);
-        }
-        .forte-score-reason.type-pitch { color: #89CFF0; }
-        .forte-score-reason.type-vibrato { color: #22c55e; }
-        .forte-score-reason.type-transition { color: #f59e0b; }
-    `,
-      )
-      .appendTo("head");
-
-    // 2. Initialize UI Elements
     toastElement = new Html("div").classOn("forte-toast").appendTo("body");
     pianoRollContainer = new Html("div")
       .classOn("forte-piano-roll-container")
@@ -834,7 +710,6 @@ const pkg = {
       .classOn("forte-score-reason")
       .appendTo("body");
 
-    // 3. Initialize Audio Context & Compressor
     try {
       audioContext = new (window.AudioContext || window.webkitAudioContext)({
         latencyHint: "interactive",
@@ -889,7 +764,6 @@ const pkg = {
       console.error("[FORTE SVC] FATAL: Web Audio API is not supported.", e);
     }
 
-    // 4. Initialize SFX Context
     try {
       sfxAudioContext = new (window.AudioContext ||
         window.webkitAudioContext)();
@@ -903,7 +777,6 @@ const pkg = {
       );
     }
 
-    // 5. Initialize Local Mic for Scoring
     await pkg.data.initializeScoringEngine();
   },
 
