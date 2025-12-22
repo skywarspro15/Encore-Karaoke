@@ -805,6 +805,9 @@ class EncoreController {
 
     // Reset Visuals
     this.dom.countdownDisplay.classOff("visible").text("");
+    this.countdownTargetTime = null; // FIX: Clear leftover countdown target
+    this.lastCountdownTick = null; // FIX: Clear leftover tick state
+
     this.dom.lrcLineDisplay1.clear().classOff("active", "next");
     this.dom.lrcLineDisplay2.clear().classOff("active", "next");
     this.dom.midiLineDisplay1.clear().classOff("active", "next");
