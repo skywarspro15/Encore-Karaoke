@@ -1332,7 +1332,6 @@ kbd {
   z-index: 20000000;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.3s ease-out;
   top: calc(2rem + 50px + 1rem);
   left: 0;
   right: 0;
