@@ -1,5 +1,6 @@
 import Html from "/libs/html.js";
 import Romanizer from "/modules/Romanizer.js";
+import generateDialog from "/modules/Dialog.js";
 import { MixerModule } from "/modules/Mixer.js";
 import { BGVModule } from "/modules/BGVPlayer.js";
 import { RecorderModule } from "/modules/Recorder.js";
@@ -83,7 +84,12 @@ class EncoreController {
       () => (this.recorder ? this.recorder.isRecording : false),
       (s) => this.getFormatInfo(s), // Pass format helper to InfoBar
     );
-    this.recorder = new RecorderModule(this.Forte, this.bgv, this.infoBar);
+    this.recorder = new RecorderModule(
+      this.Forte,
+      this.bgv,
+      this.infoBar,
+      generateDialog,
+    );
 
     // --- Event Handlers (Bound) ---
     this.boundKeydown = this.handleKeyDown.bind(this);
@@ -417,8 +423,8 @@ class EncoreController {
           i === 0
             ? "song-header-code"
             : i === 1
-            ? "song-header-title"
-            : "song-header-artist",
+              ? "song-header-title"
+              : "song-header-artist",
         )
         .text(t)
         .appendTo(listHeader),
@@ -742,23 +748,23 @@ class EncoreController {
       this.state.songNumber.length > 0
         ? this.songMap.get(code)
         : this.state.highlightedIndex >= 0
-        ? this.songList[this.state.highlightedIndex]
-        : null;
+          ? this.songList[this.state.highlightedIndex]
+          : null;
 
     this.dom.numberDisplay.text(
       this.state.songNumber.length > 0
         ? code
         : activeSong
-        ? activeSong.code
-        : "",
+          ? activeSong.code
+          : "",
     );
     this.dom.numberDisplay[activeSong ? "classOn" : "classOff"]("active");
     this.dom.songTitle.text(
       activeSong
         ? activeSong.title
         : this.state.songNumber.length === 5
-        ? "Song Not Found"
-        : "",
+          ? "Song Not Found"
+          : "",
     );
     this.dom.songArtist.text(activeSong ? activeSong.artist : "");
 
@@ -1335,9 +1341,12 @@ class EncoreController {
             if (nextLine) {
               if (nextLine.time - curLine.time > 8.0)
                 this.scheduleCountdown(nextLine.time);
-              this.nextLineUpdateTimeout = setTimeout(() => {
-                this.renderLrcLine(next, nextLine);
-              }, (nextLine.time - curLine.time) * 500);
+              this.nextLineUpdateTimeout = setTimeout(
+                () => {
+                  this.renderLrcLine(next, nextLine);
+                },
+                (nextLine.time - curLine.time) * 500,
+              );
             }
           }
         }
@@ -1714,8 +1723,8 @@ class EncoreController {
     let songInfo = song
       ? `${fmtBadge} <span class="info-bar-title">${song.title}</span><span class="info-bar-artist">- ${song.artist}</span>`
       : this.state.reservationNumber.length === 5
-      ? `<span style="opacity: 0.5;">No song found.</span>`
-      : "";
+        ? `<span style="opacity: 0.5;">No song found.</span>`
+        : "";
     const content = `<span class="info-bar-code">${displayCode}</span> ${songInfo}`;
 
     if (isTemp) {
@@ -1742,8 +1751,8 @@ class EncoreController {
         let song = this.state.songNumber
           ? this.songMap.get(this.state.songNumber.padStart(5, "0"))
           : this.state.highlightedIndex >= 0
-          ? this.songList[this.state.highlightedIndex]
-          : null;
+            ? this.songList[this.state.highlightedIndex]
+            : null;
         if (song) {
           this.state.songNumber = "";
           this.state.highlightedIndex = -1;
@@ -1900,13 +1909,22 @@ class EncoreController {
     );
     this.Forte.setMultiplexPan(pan);
     let txt = "BALANCED";
-    if (pan <= -0.99) txt = "INSTRUMENTAL";
-    else if (pan >= 0.99) txt = "VOCAL GUIDE";
-    else
+    if (pan <= -0.99) {
+      txt = "INSTRUMENTAL";
+      generateDialog(
+        new Html("div").classOn("temp-dialog-text").text("VOCAL OFF"),
+      );
+    } else if (pan >= 0.99) {
+      txt = "VOCAL GUIDE";
+      generateDialog(
+        new Html("div").classOn("temp-dialog-text").text("INST. OFF"),
+      );
+    } else {
       txt =
         pan < 0
           ? `◀ ${Math.abs(Math.round(pan * 100))}% INST`
           : `VOC ${Math.round(pan * 100)}% ▶`;
+    }
     this.infoBar.showTemp("VOCAL BALANCE", txt, 3000);
   }
 
@@ -2030,6 +2048,10 @@ class EncoreController {
               "BGV",
               `This function is not available in Music Videos.`,
               5000,
+            );
+            generateDialog(
+              new Html("div").classOn("temp-dialog-text").text("NOT AVAILABLE"),
+              2000,
             );
           }
           break;

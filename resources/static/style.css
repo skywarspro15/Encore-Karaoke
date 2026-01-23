@@ -115,8 +115,18 @@
 body {
   background-color: var(--background-dimmer);
   color: var(--label-lighter);
-  font-family: "Radio Canada", system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue",
+  font-family:
+    "Radio Canada",
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Oxygen,
+    Ubuntu,
+    Cantarell,
+    "Open Sans",
+    "Helvetica Neue",
     sans-serif;
 }
 
@@ -535,8 +545,18 @@ button,
 
 [part="cue"] {
   border-radius: 10px;
-  font-family: "Radio Canada", system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue",
+  font-family:
+    "Radio Canada",
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Oxygen,
+    Ubuntu,
+    Cantarell,
+    "Open Sans",
+    "Helvetica Neue",
     sans-serif;
   background: rgba(0, 0, 0, 0.5);
 }
@@ -681,7 +701,9 @@ input[type="range"] {
   scroll-margin: 6rem;
   scroll-snap-align: center;
   flex-shrink: 0;
-  transition: width 0.25s ease, height 0.25s ease;
+  transition:
+    width 0.25s ease,
+    height 0.25s ease;
 }
 .game-list .game.over {
   width: 26.5rem;
@@ -1180,7 +1202,9 @@ kbd {
   box-shadow: 0 5px 25px rgba(0, 0, 0, 0.5);
   padding: 1rem;
   z-index: 11;
-  transition: opacity 0.3s ease-out, background 0.3s ease-out;
+  transition:
+    opacity 0.3s ease-out,
+    background 0.3s ease-out;
   pointer-events: none;
 }
 
@@ -1210,6 +1234,42 @@ kbd {
   /* This element no longer needs absolute positioning */
   font-family: "Rajdhani", sans-serif;
   font-size: 2rem;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.7);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  padding: 0 1.5rem;
+}
+
+.temp-dialog {
+  position: absolute;
+  top: 40%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: auto;
+  min-width: 450px;
+  max-width: 55%;
+  height: auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: rgba(8, 8, 16, 0.75);
+  backdrop-filter: blur(8px);
+  border-radius: 0.5rem;
+  box-shadow: 0 5px 25px rgba(0, 0, 0, 0.5);
+  padding: 1rem;
+  z-index: 21;
+  transition:
+    opacity 0.3s ease-out,
+    background 0.3s ease-out;
+  pointer-events: none;
+}
+
+.temp-dialog-text {
+  font-family: "Rajdhani", sans-serif;
+  font-size: 5rem;
   font-weight: 700;
   color: #fff;
   text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.7);
@@ -1465,7 +1525,9 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 0;
-  transition: height 0.25s ease-in-out, box-shadow 0.25s ease-in-out;
+  transition:
+    height 0.25s ease-in-out,
+    box-shadow 0.25s ease-in-out;
   overflow: hidden;
   z-index: 2000000;
 }
@@ -1629,11 +1691,14 @@ kbd {
   font-size: 6rem;
   color: #000;
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
-  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5), 0 5px 15px rgba(0, 0, 0, 0.4);
+  box-shadow:
+    inset 0 0 10px rgba(0, 0, 0, 0.5),
+    0 5px 15px rgba(0, 0, 0, 0.4);
   border: 4px solid #4d4d4d;
   opacity: 0;
   transform: scale(0.8);
-  transition: opacity 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+  transition:
+    opacity 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275),
     transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   pointer-events: none;
   line-height: 1;
@@ -1678,7 +1743,9 @@ kbd {
   font-size: 4.5rem;
   font-weight: bold;
   text-shadow: 2px 2px 6px #000;
-  transition: color 0.3s ease, opacity 0.3s ease;
+  transition:
+    color 0.3s ease,
+    opacity 0.3s ease;
   color: rgba(255, 255, 255, 0.4);
   -webkit-text-stroke: 0;
 }
@@ -1806,7 +1873,9 @@ kbd {
   color: white;
   z-index: 16;
   opacity: 0;
-  transition: opacity 0.4s ease-out, transform 0.4s ease-out;
+  transition:
+    opacity 0.4s ease-out,
+    transform 0.4s ease-out;
   pointer-events: none;
   display: flex;
   flex-direction: column;
@@ -1822,7 +1891,9 @@ kbd {
 .intro-card-artist {
   opacity: 0;
   transform: translateY(20px);
-  transition: opacity 0.4s ease-out, transform 0.4s ease-out;
+  transition:
+    opacity 0.4s ease-out,
+    transform 0.4s ease-out;
 }
 
 .intro-card.visible .intro-card-title {
@@ -1987,7 +2058,9 @@ kbd {
   align-items: baseline;
   gap: 0.75rem;
   opacity: 0;
-  transition: opacity 0.3s ease, bottom 0.3s ease;
+  transition:
+    opacity 0.3s ease,
+    bottom 0.3s ease;
   pointer-events: none;
 }
 
@@ -2084,7 +2157,10 @@ kbd {
   font-size: 10rem;
   font-weight: 900;
   line-height: 1;
-  text-shadow: 0 0 10px #fff, 0 0 20px #89cff0, 0 0 30px #89cff0;
+  text-shadow:
+    0 0 10px #fff,
+    0 0 20px #89cff0,
+    0 0 30px #89cff0;
   color: #f0f0f0;
 }
 
@@ -2271,7 +2347,9 @@ kbd {
   font-weight: 600;
   cursor: pointer;
   border-left: 4px solid transparent;
-  transition: background-color 0.2s ease, border-color 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease;
 }
 
 .mixer-item--active {
@@ -2547,7 +2625,9 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: 0 0 8px #f7b733;
   z-index: 2;
   opacity: 0;
-  transition: top 0.05s linear, opacity 0.1s linear;
+  transition:
+    top 0.05s linear,
+    opacity 0.1s linear;
   transform: translateY(-50%);
   will-change: top, opacity;
 }
@@ -2565,7 +2645,9 @@ input[type="range"]::-moz-range-thumb {
   paint-order: stroke fill;
   z-index: 20;
   opacity: 0;
-  transition: opacity 0.3s ease, transform 0.3s ease;
+  transition:
+    opacity 0.3s ease,
+    transform 0.3s ease;
   pointer-events: none;
   will-change: opacity, transform;
 }

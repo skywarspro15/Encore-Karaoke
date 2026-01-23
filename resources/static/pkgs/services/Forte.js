@@ -766,8 +766,9 @@ const pkg = {
     }
 
     try {
-      sfxAudioContext = new (window.AudioContext ||
-        window.webkitAudioContext)();
+      sfxAudioContext = new (
+        window.AudioContext || window.webkitAudioContext
+      )();
       sfxGain = sfxAudioContext.createGain();
       sfxGain.connect(sfxAudioContext.destination);
       sfxGain.gain.value = state.playback.volume;
@@ -978,7 +979,9 @@ const pkg = {
           let displayableLyricIndex = 0;
           state.playback.sequencer.onTextEvent = (messageData, messageType) => {
             if (messageType === 5) {
-              const text = new TextDecoder("windows-1250").decode(messageData.buffer);
+              const text = new TextDecoder("windows-1250").decode(
+                messageData.buffer,
+              );
               const cleanText = text.replace(/[\r\n\/\\]/g, "");
               // Only dispatch if it has content AND is not metadata
               if (cleanText && !cleanText.startsWith("@")) {
@@ -996,9 +999,8 @@ const pkg = {
           };
           state.playback.buffer = null;
         } else {
-          state.playback.buffer = await audioContext.decodeAudioData(
-            arrayBuffer,
-          );
+          state.playback.buffer =
+            await audioContext.decodeAudioData(arrayBuffer);
           if (state.playback.isMultiplexed) {
             startIncrementalGuideAnalysis(state.playback.buffer);
           }

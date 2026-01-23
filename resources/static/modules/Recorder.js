@@ -1,10 +1,11 @@
 import Html from "/libs/html.js";
 
 export class RecorderModule {
-  constructor(forteSvc, bgvModule, infoBarModule) {
+  constructor(forteSvc, bgvModule, infoBarModule, dialogShow) {
     this.forteSvc = forteSvc;
     this.bgvPlayer = bgvModule;
     this.infoBar = infoBarModule;
+    this.dialogShow = dialogShow;
     this.isRecording = false;
     this.mediaRecorder = null;
     this.recordedChunks = [];
@@ -77,6 +78,10 @@ export class RecorderModule {
       }
     } catch (e) {
       this.infoBar.showTemp("RECORDING", e, 4000);
+      this.dialogShow(
+        new Html("div").classOn("temp-dialog-text").text("NOT AVAILABLE"),
+        2000,
+      );
       return;
     }
 
@@ -96,12 +101,20 @@ export class RecorderModule {
         mimeType: "video/webm; codecs=vp9,opus",
         videoBitsPerSecond: 2500000, // 2.5 Mbps for 720p
       });
+      this.dialogShow(
+        new Html("div").classOn("temp-dialog-text").text("RECORD STARTED"),
+        2000,
+      );
     } catch (e) {
       console.error("Failed to create MediaRecorder:", e);
       this.infoBar.showTemp(
         "RECORDING",
         "Error: Could not start recorder.",
         4000,
+      );
+      this.dialogShow(
+        new Html("div").classOn("temp-dialog-text").text("NOT AVAILABLE"),
+        2000,
       );
       return;
     }
@@ -164,6 +177,10 @@ export class RecorderModule {
 
     this.mediaRecorder = null;
     this.infoBar.showDefault();
+    this.dialogShow(
+      new Html("div").classOn("temp-dialog-text").text("RECORD STOPPED"),
+      2000,
+    );
   }
 
   drawFrame() {
