@@ -2682,6 +2682,21 @@ input[type="range"]::-moz-range-thumb {
   letter-spacing: 0.5px;
 }
 
+/* Version Badge */
+.version-badge {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 2rem;
+  font-family: "Rajdhani", sans-serif;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  z-index: 9999;
+  pointer-events: none;
+}
+
 /* Adjust title containers to align text with badges */
 .song-item-title,
 .search-title {

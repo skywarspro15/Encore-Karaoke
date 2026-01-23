@@ -486,6 +486,12 @@ class EncoreController {
     // --- QR Code ---
     this.buildQR();
 
+    // --- Version Badge ---
+    new Html("div")
+      .classOn("version-badge")
+      .text("BETA 1.0.0")
+      .appendTo(this.wrapper);
+
     // --- Search Window ---
     this.dom.searchWindow = new Html("div")
       .classOn("search-window")

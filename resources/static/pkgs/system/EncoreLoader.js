@@ -189,9 +189,8 @@ const pkg = {
           await this.proceedWithLoading(libraryPath);
         } else if (foundLibraries.length > 1) {
           statusP.text("Multiple libraries found. Please choose one.");
-          const selectedPath = await this.promptUserToSelectLibrary(
-            foundLibraries,
-          );
+          const selectedPath =
+            await this.promptUserToSelectLibrary(foundLibraries);
           await window.config.merge({
             libraryPath: selectedPath,
             setupComplete: true,
