@@ -959,7 +959,7 @@ const pkg = {
             state.playback.sequencer.addOnSongChangeEvent(() => {
               const rawLyrics = state.playback.sequencer.midiData.lyrics;
               if (rawLyrics && rawLyrics.length > 0) {
-                const decoder = new TextDecoder("windows-1250");
+                const decoder = new TextDecoder("shift-JIS");
                 // Filter out metadata lyrics (starting with @)
                 // but keep structural ones (like standalone newlines/slashes)
                 // so the UI can detect line breaks.
@@ -979,7 +979,7 @@ const pkg = {
           let displayableLyricIndex = 0;
           state.playback.sequencer.onTextEvent = (messageData, messageType) => {
             if (messageType === 5) {
-              const text = new TextDecoder("windows-1250").decode(
+              const text = new TextDecoder("shift-JIS").decode(
                 messageData.buffer,
               );
               const cleanText = text.replace(/[\r\n\/\\]/g, "");

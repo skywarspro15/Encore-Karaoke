@@ -1114,7 +1114,9 @@ class EncoreController {
       for (const syllableText of pbState.decodedLyrics) {
         const startsWithNewLine = /^[\r\n\/\\\\]/.test(syllableText);
         const endsWithNewLine = /[\r\n\/\\\\]$/.test(syllableText);
-        const cleanText = syllableText.replace(/[\r\n\/\\]/g, "");
+
+        // Remove control characters for processing
+        let cleanText = syllableText.replace(/[\r\n\/\\]/g, "");
 
         if (startsWithNewLine && currentLineSyllables.length > 0) {
           lines.push(currentLineSyllables);
@@ -1122,10 +1124,27 @@ class EncoreController {
         }
 
         if (cleanText) {
-          const romanized = await Romanizer.romanize(cleanText);
+          let mainText = cleanText;
+          let furiganaText = null;
+
+          // Regex to catch "Kanji[Furigana]" format
+          // Matches any char non-greedy, followed by content in brackets
+          const furiMatch = cleanText.match(/^(.+?)\[(.+?)\]$/);
+
+          if (furiMatch) {
+            mainText = furiMatch[1]; // e.g., 星空
+            furiganaText = furiMatch[2]; // e.g., ほし
+          }
+
+          // Use Furigana for Romanization if available, otherwise use main text.
+          const textToRomanize = furiganaText || mainText;
+          const romanized = await Romanizer.romanize(textToRomanize);
+
           const syllable = {
-            text: cleanText,
+            text: mainText,
+            furigana: furiganaText,
             romanized: romanized,
+            rawText: cleanText,
             globalIndex: displayableSyllableIndex,
             lineIndex: lines.length,
           };
@@ -1156,11 +1175,23 @@ class EncoreController {
             .classOn("lyric-syllable-container")
             .attr({ "data-index": s.globalIndex })
             .appendTo(displayEl);
+
+          const furiSpan = new Html("span")
+            .classOn("lyric-syllable-furigana")
+            .appendTo(container);
+
+          if (s.furigana) {
+            furiSpan.attr({ "data-text": s.furigana }).text(s.furigana);
+          } else {
+            furiSpan.html("&nbsp;").styleJs({ visibility: "hidden" });
+          }
+
           new Html("span")
             .classOn("lyric-syllable-original")
             .attr({ "data-text": s.text })
             .text(s.text)
             .appendTo(container);
+
           if (s.romanized) {
             new Html("span")
               .classOn("lyric-syllable-romanized")
@@ -1192,7 +1223,8 @@ class EncoreController {
         let targetSyllable = allSyllables[currentVisualIndex];
         let matchFound = false;
 
-        if (targetSyllable.text === cleanInput) {
+        // Check against rawText (which includes the brackets) to match the incoming MIDI event exactly
+        if (targetSyllable.rawText === cleanInput) {
           matchFound = true;
         } else {
           const lookAheadLimit = Math.min(
@@ -1201,7 +1233,8 @@ class EncoreController {
           );
 
           for (let i = currentVisualIndex + 1; i < lookAheadLimit; i++) {
-            if (allSyllables[i].text === cleanInput) {
+            // Check rawText here as well
+            if (allSyllables[i].rawText === cleanInput) {
               console.log(
                 `[Encore] Lyric Resync: Skipped from ${currentVisualIndex} to ${i} ("${cleanInput}")`,
               );

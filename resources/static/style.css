@@ -1824,12 +1824,76 @@ kbd {
   width: 100%;
 }
 
+/* Add styles for the Furigana (top text) */
+.lyric-syllable-furigana {
+  position: relative;
+  font-size: 1.25rem; /* Smaller than main text */
+  margin-bottom: 0.1rem;
+  color: rgba(255, 255, 255, 0.5); /* Slightly dim by default */
+  line-height: 1;
+  font-weight: 500;
+}
+
+/* Ensure Furigana gets the wipe effect too */
+.lyric-syllable-furigana::after {
+  content: attr(data-text);
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  color: #ffb74d; /* Use a gold/orange tint for Furigana active state to distinguish slightly, or keep white */
+  text-shadow: none;
+  -webkit-text-stroke: 3px #010141;
+  paint-order: stroke fill;
+  overflow: hidden;
+  transition: width 0.1s linear;
+}
+
+/* Update original syllable to be main focus */
+.lyric-syllable-original {
+  position: relative;
+  font-size: inherit;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.lyric-syllable-romanized {
+  position: relative;
+  font-size: 1.5rem;
+  margin-top: 0.25rem;
+  line-height: 1;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* Shared wipe effect logic */
+.lyric-syllable-original::after,
+.lyric-syllable-romanized::after {
+  content: attr(data-text);
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  color: #ffffff;
+  text-shadow: none;
+  -webkit-text-stroke: 5px #010141;
+  paint-order: stroke fill;
+  overflow: hidden;
+  transition: width 0.1s linear;
+}
+
+/* Trigger the wipe on all 3 elements when container is active */
+.lyric-syllable-container.active .lyric-syllable-furigana::after,
+.lyric-syllable-container.active .lyric-syllable-original::after,
+.lyric-syllable-container.active .lyric-syllable-romanized::after {
+  width: 100%;
+}
+
 .lyric-syllable-original {
   font-size: inherit;
 }
 
 .lyric-syllable-romanized {
-  font-size: 1rem;
+  font-size: 1.5rem;
   margin-top: 0.25rem;
   line-height: 1;
   font-weight: 500;
