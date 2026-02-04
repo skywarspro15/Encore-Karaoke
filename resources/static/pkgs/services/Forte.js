@@ -747,7 +747,7 @@ const pkg = {
         await audioContext.audioWorklet.addModule(
           "/libs/spessasynth_lib/synthetizer/worklet_processor.min.js",
         );
-        const soundFontUrl = "/libs/soundfonts/GeneralUser-GS.sf2";
+        const soundFontUrl = "/libs/soundfonts/SAM2695.sf2";
         const soundFontBuffer = await (await fetch(soundFontUrl)).arrayBuffer();
         state.playback.synthesizer = new Synthetizer(
           masterGain,
