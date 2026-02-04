@@ -1843,7 +1843,27 @@ class EncoreController {
 
   handleEnter() {
     if (this.state.mode === "menu") {
-      if (this.state.reservationQueue.length)
+      if (
+        this.state.isSearchOverlayVisible &&
+        this.state.highlightedSearchIndex !== -1
+      ) {
+        const res = this.state.searchResults[this.state.highlightedSearchIndex];
+        const song =
+          res.type === "local"
+            ? { ...res }
+            : {
+                title: res.title,
+                artist: res.channelTitle,
+                path: `yt://${res.id}`,
+                durationText: res.length?.simpleText,
+                isLive: res.isLive,
+              };
+        this.state.songNumber = "";
+        this.state.highlightedIndex = -1;
+        this.state.isTypingNumber = false;
+        this.toggleSearchOverlay(false);
+        this.startPlayer(song);
+      } else if (this.state.reservationQueue.length)
         this.startPlayer(this.state.reservationQueue.shift());
       else {
         let song = this.state.songNumber
