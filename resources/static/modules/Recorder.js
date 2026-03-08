@@ -190,8 +190,7 @@ export class RecorderModule {
 
     this.ctx.clearRect(0, 0, w, h);
 
-    // FIX: Adapt to Single Buffer BGV Player
-    // The new BGV module exposes a single `videoElement`
+    // Adapt to Single Buffer BGV Player
     const sourceVideo = this.bgvPlayer.videoElement;
 
     if (sourceVideo && sourceVideo.readyState >= 2 && !sourceVideo.paused) {
@@ -214,29 +213,45 @@ export class RecorderModule {
       this.ctx.textAlign = "center";
       this.ctx.textBaseline = "bottom";
 
-      // Relative positioning logic (720p compatible)
-      const line1BaseY = h * 0.85;
-      const line2BaseY = h * 0.93;
+      // Detect if we are using MIDI or standard LRC mode based on container display state
+      const isMidi =
+        this.uiRefs.midiContainer &&
+        this.uiRefs.midiContainer.elm.style.display === "flex";
 
-      const line1HasRomanized = this.uiRefs.lrcLineDisplay1.elm.querySelector(
-        ".lyric-line-romanized",
-      )?.textContent;
-      const line2HasRomanized = this.uiRefs.lrcLineDisplay2.elm.querySelector(
-        ".lyric-line-romanized",
-      )?.textContent;
+      if (isMidi) {
+        // --- MIDI Rendering ---
+        // Give slightly more vertical space for Furigana and Romanized text combination
+        const line1Y = h * 0.81;
+        const line2Y = h * 0.94;
 
-      const romOffset = h * 0.04;
+        this.drawMidiLine(this.uiRefs.midiLineDisplay1.elm, line1Y, h);
+        this.drawMidiLine(this.uiRefs.midiLineDisplay2.elm, line2Y, h);
+      } else {
+        // --- Standard LRC Rendering ---
+        const line1BaseY = h * 0.85;
+        const line2BaseY = h * 0.93;
 
-      const line1Y = line1HasRomanized
-        ? line2HasRomanized
-          ? line1BaseY - romOffset * 2
-          : line1BaseY - romOffset
-        : line1BaseY;
-      const line2Y = line2HasRomanized ? line2BaseY - romOffset : line2BaseY;
+        const line1HasRomanized = this.uiRefs.lrcLineDisplay1.elm.querySelector(
+          ".lyric-line-romanized",
+        )?.textContent;
+        const line2HasRomanized = this.uiRefs.lrcLineDisplay2.elm.querySelector(
+          ".lyric-line-romanized",
+        )?.textContent;
 
-      this.drawLyricLine(this.uiRefs.lrcLineDisplay1.elm, line1Y, h);
-      this.drawLyricLine(this.uiRefs.lrcLineDisplay2.elm, line2Y, h);
+        const romOffset = h * 0.04;
 
+        const line1Y = line1HasRomanized
+          ? line2HasRomanized
+            ? line1BaseY - romOffset * 2
+            : line1BaseY - romOffset
+          : line1BaseY;
+        const line2Y = line2HasRomanized ? line2BaseY - romOffset : line2BaseY;
+
+        this.drawLyricLine(this.uiRefs.lrcLineDisplay1.elm, line1Y, h);
+        this.drawLyricLine(this.uiRefs.lrcLineDisplay2.elm, line2Y, h);
+      }
+
+      // Draw Score HUD if active
       if (
         this.uiRefs.scoreDisplay.elm.parentElement.classList.contains("visible")
       ) {
@@ -326,6 +341,116 @@ export class RecorderModule {
         this.canvas.width / 2,
         y + h * 0.04,
       );
+    }
+  }
+
+  drawMidiLine(element, y, h) {
+    const syllableEls = Array.from(
+      element.querySelectorAll(".lyric-syllable-container"),
+    );
+    if (syllableEls.length === 0) return;
+
+    const isLineActive = element.classList.contains("active");
+    const isLineNext = element.classList.contains("next");
+
+    const mainFontSize = `${Math.floor(h * 0.066)}px`;
+    const subFontSize = `${Math.floor(h * 0.022)}px`;
+
+    // 1. Calculate the layout widths to center the block natively
+    const layoutSyllables = [];
+    let totalWidth = 0;
+    const padding = h * 0.008; // Small margin between syllables
+
+    for (const container of syllableEls) {
+      // Clear out NBSP characters that HTML elements often use as placeholders
+      const origText =
+        container
+          .querySelector(".lyric-syllable-original")
+          ?.textContent.replace(/\u00A0/g, "")
+          .trim() || "";
+      const romText =
+        container
+          .querySelector(".lyric-syllable-romanized")
+          ?.textContent.replace(/\u00A0/g, "")
+          .trim() || "";
+      const furiText =
+        container
+          .querySelector(".lyric-syllable-furigana")
+          ?.textContent.replace(/\u00A0/g, "")
+          .trim() || "";
+
+      const isActive = container.classList.contains("active");
+
+      // Measure dimensions
+      this.ctx.font = `bold ${mainFontSize} Rajdhani, sans-serif`;
+      const origW = origText ? this.ctx.measureText(origText).width : 0;
+
+      this.ctx.font = `500 ${subFontSize} Rajdhani, sans-serif`;
+      const romW = romText ? this.ctx.measureText(romText).width : 0;
+      const furiW = furiText ? this.ctx.measureText(furiText).width : 0;
+
+      const blockWidth = Math.max(origW, romW, furiW) + padding;
+
+      layoutSyllables.push({
+        origText,
+        romText,
+        furiText,
+        isActive,
+        width: blockWidth,
+      });
+      totalWidth += blockWidth;
+    }
+
+    // 2. Iterate and draw using calculated Start X
+    let currentX = (this.canvas.width - totalWidth) / 2;
+
+    for (const s of layoutSyllables) {
+      const centerX = currentX + s.width / 2;
+
+      // Determine colors based on active state of syllable AND line
+      let drawColor;
+      if (s.isActive) {
+        drawColor = "#FFFFFF"; // Actively highlighted
+      } else if (isLineNext) {
+        drawColor = "rgba(255, 255, 255, 0.5)"; // Next line dimming
+      } else if (isLineActive) {
+        drawColor = "rgba(255, 255, 255, 0.8)"; // Not highlighted yet, but active line
+      } else {
+        drawColor = "rgba(255, 255, 255, 0.5)"; // Default fallback
+      }
+
+      // Draw Romanized text (below)
+      if (s.romText) {
+        this.ctx.font = `500 ${subFontSize} Rajdhani, sans-serif`;
+        this.ctx.fillStyle = drawColor;
+        this.ctx.fillText(s.romText, centerX, y + h * 0.04);
+      }
+
+      // Draw Furigana text (above)
+      if (s.furiText) {
+        this.ctx.font = `500 ${subFontSize} Rajdhani, sans-serif`;
+        this.ctx.fillStyle = drawColor;
+        this.ctx.fillText(s.furiText, centerX, y - h * 0.08); // Render above baseline
+      }
+
+      // Draw Main Original text
+      if (s.origText) {
+        this.ctx.font = `bold ${mainFontSize} Rajdhani, sans-serif`;
+        this.ctx.fillStyle = drawColor;
+
+        // Apply highlighting stroke if active
+        if (s.isActive) {
+          this.ctx.strokeStyle = "#010141";
+          this.ctx.lineWidth = h * 0.01;
+          this.ctx.lineJoin = "round";
+          this.ctx.strokeText(s.origText, centerX, y);
+        }
+
+        this.ctx.fillText(s.origText, centerX, y);
+      }
+
+      // Move cursor rightward
+      currentX += s.width;
     }
   }
 }

@@ -106,6 +106,7 @@ const state = {
     status: "stopped",
     buffer: null,
     synthesizer: null,
+    midiGain: null, // Intermediate gain node for MIDI routing
     sequencer: null,
     isMidi: false,
     isMultiplexed: false,
@@ -737,6 +738,10 @@ const pkg = {
       state.effects.micChainInput.connect(state.effects.micChainOutput);
       state.effects.micChainOutput.connect(state.recording.destinationNode);
 
+      // Create intermediate Gain node for MIDI
+      state.playback.midiGain = audioContext.createGain();
+      state.playback.midiGain.connect(masterGain);
+
       console.log("[FORTE SVC] Audio pipelines initialized.");
 
       state.playback.currentDeviceId = audioContext.sinkId || "default";
@@ -749,8 +754,10 @@ const pkg = {
         );
         const soundFontUrl = "/libs/soundfonts/SAM2695.sf2";
         const soundFontBuffer = await (await fetch(soundFontUrl)).arrayBuffer();
+
+        // Connect to midiGain instead of masterGain to allow routing interception
         state.playback.synthesizer = new Synthetizer(
-          masterGain,
+          state.playback.midiGain,
           soundFontBuffer,
         );
         console.log("[FORTE SVC] MIDI Synthesizer initialized successfully.");
@@ -784,9 +791,7 @@ const pkg = {
 
   data: {
     getRecordingAudioStream: () => {
-      if (state.playback.isMidi) {
-        throw new Error("This track does not support Recording.");
-      }
+      // Removed check that prevented MIDI from recording
       return state.recording.audioStream;
     },
 
@@ -884,7 +889,11 @@ const pkg = {
           state.playback.synthesizer = null;
         }
 
-        state.playback.synthesizer = new Synthetizer(masterGain, arrayBuffer);
+        // Recreate synthesizer connected to the intermediate MIDI gain node
+        state.playback.synthesizer = new Synthetizer(
+          state.playback.midiGain,
+          arrayBuffer,
+        );
 
         if (state.playback.transpose !== 0) {
           state.playback.synthesizer.transpose(state.playback.transpose);
@@ -1037,9 +1046,13 @@ const pkg = {
         if (!state.playback.sequencer || state.playback.status === "playing")
           return;
 
-        // Force disable mic for MIDI performance optimization
-        // We preserve user preference in userInputEnabled
-        pkg.data.stopMicInput();
+        // Route MIDI audio to recording if active
+        if (state.recording.trackDelayNode && state.playback.midiGain) {
+          state.playback.midiGain.connect(state.recording.trackDelayNode);
+        }
+
+        // Scoring is disabled for MIDI tracks as there's no vocal guide.
+        // Mic input remains active for other features like recording or streaming.
         state.scoring.enabled = false;
 
         state.playback.sequencer.currentTime = 0;
@@ -1151,11 +1164,10 @@ const pkg = {
 
       if (state.recording.trackDelayNode) {
         state.recording.trackDelayNode.disconnect();
-        if (state.playback.isMidi && state.playback.synthesizer) {
+        // Disconnect MIDI output from recording if active
+        if (state.playback.isMidi && state.playback.midiGain) {
           try {
-            state.playback.synthesizer.disconnect(
-              state.recording.trackDelayNode,
-            );
+            state.playback.midiGain.disconnect(state.recording.trackDelayNode);
           } catch (e) {}
         }
         state.recording.trackDelayNode = null;
@@ -1196,18 +1208,15 @@ const pkg = {
         if (scoreReasonTimeout) clearTimeout(scoreReasonTimeout);
       }
 
-      const wasMidi = state.playback.isMidi;
-
       if (state.playback.status === "stopped") return;
 
       // Disconnect Recording
       if (state.recording.trackDelayNode) {
         state.recording.trackDelayNode.disconnect();
-        if (state.playback.isMidi && state.playback.synthesizer) {
+        // Disconnect MIDI output from recording if active
+        if (state.playback.isMidi && state.playback.midiGain) {
           try {
-            state.playback.synthesizer.disconnect(
-              state.recording.trackDelayNode,
-            );
+            state.playback.midiGain.disconnect(state.recording.trackDelayNode);
           } catch (e) {}
         }
         state.recording.trackDelayNode = null;
@@ -1229,11 +1238,6 @@ const pkg = {
       state.playback.multiplexPan = -1;
       state.playback.status = "stopped";
       state.playback.pauseTime = 0;
-
-      // Restore Mic Input if it was disabled by MIDI optimization
-      if (wasMidi && state.scoring.userInputEnabled) {
-        pkg.data.startMicInput(state.scoring.currentMicDeviceId);
-      }
 
       dispatchPlaybackUpdate();
 

@@ -172,8 +172,12 @@ class EncoreController {
     this.recorder.mount(this.wrapper);
     this.recorder.setUiRefs({
       playerUi: this.dom.playerUi,
+      lrcContainer: this.dom.lrcContainer,
       lrcLineDisplay1: this.dom.lrcLineDisplay1,
       lrcLineDisplay2: this.dom.lrcLineDisplay2,
+      midiContainer: this.dom.midiContainer,
+      midiLineDisplay1: this.dom.midiLineDisplay1,
+      midiLineDisplay2: this.dom.midiLineDisplay2,
       scoreDisplay: this.scoreHud.scoreDisplay,
     });
 
