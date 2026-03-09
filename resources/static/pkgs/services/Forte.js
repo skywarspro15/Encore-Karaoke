@@ -16,6 +16,39 @@ function dispatchPlaybackUpdate() {
   );
 }
 
+/**
+ * Attempts to automatically detect the correct text encoding of a buffer.
+ * It checks structural validity first, then looks for visual "mojibake" errors.
+ */
+function detectEncoding(uint8Array) {
+  const encodings = [
+    "utf-8",
+    "shift-jis", // Japanese
+    "euc-kr", // Korean (TJ Media / KY)
+    "windows-1250", // Central European (often used in PH karaoke) / for PLATINUM & MegaPro
+    "windows-1252", // Western European
+  ];
+
+  for (const encoding of encodings) {
+    try {
+      const decoder = new TextDecoder(encoding, { fatal: true });
+      const text = decoder.decode(uint8Array);
+
+      if (text.includes("\uFFFD")) continue;
+      const controlChars = (text.match(/[\x00-\x08\x0B-\x0C\x0E-\x1F]/g) || [])
+        .length;
+
+      if (text.length > 0 && controlChars / text.length > 0.05) continue;
+
+      return encoding;
+    } catch (e) {
+      continue;
+    }
+  }
+
+  return "utf-8";
+}
+
 // --- Global Variables & Constants ---
 
 // Core
@@ -82,7 +115,7 @@ const state = {
       upband: 0,
       downband: 0,
     },
-    measuredLatencyS: 0.15,
+    measuredLatencyS: 0.5,
     totalScorableNotes: 0,
     notesHit: 0,
     vibratoOpportunities: 0,
@@ -112,6 +145,7 @@ const state = {
     isMultiplexed: false,
     decodedLyrics: [],
     guideNotes: [],
+    lyricsEncoding: "utf-8", // Dynamically detected encoding
     isAnalyzing: false,
     startTime: 0,
     pauseTime: 0,
@@ -919,6 +953,7 @@ const pkg = {
         state.playback.sequencer = null;
       }
       state.playback.decodedLyrics = [];
+      state.playback.lyricsEncoding = "utf-8";
       state.playback.transpose = 0;
       state.playback.isMultiplexed = false;
       state.playback.multiplexPan = -1;
@@ -969,10 +1004,24 @@ const pkg = {
             state.playback.sequencer.addOnSongChangeEvent(() => {
               const rawLyrics = state.playback.sequencer.midiData.lyrics;
               if (rawLyrics && rawLyrics.length > 0) {
-                const decoder = new TextDecoder("shift-JIS");
-                // Filter out metadata lyrics (starting with @)
-                // but keep structural ones (like standalone newlines/slashes)
-                // so the UI can detect line breaks.
+                const totalLength = rawLyrics.reduce(
+                  (acc, val) => acc + val.byteLength,
+                  0,
+                );
+                const combinedBuffer = new Uint8Array(totalLength);
+                let offset = 0;
+                for (const buffer of rawLyrics) {
+                  combinedBuffer.set(new Uint8Array(buffer), offset);
+                  offset += buffer.byteLength;
+                }
+
+                state.playback.lyricsEncoding = detectEncoding(combinedBuffer);
+                console.log(
+                  `[FORTE SVC] Detected MIDI lyric encoding: ${state.playback.lyricsEncoding}`,
+                );
+
+                const decoder = new TextDecoder(state.playback.lyricsEncoding);
+
                 state.playback.decodedLyrics = rawLyrics
                   .map((lyricBuffer) => decoder.decode(lyricBuffer))
                   .filter((text) => {
@@ -981,6 +1030,8 @@ const pkg = {
                     return !clean.startsWith("@");
                   });
                 console.log(state.playback.decodedLyrics);
+              } else {
+                state.playback.lyricsEncoding = "utf-8";
               }
               resolve();
             }, "forte-loader");
@@ -989,9 +1040,9 @@ const pkg = {
           let displayableLyricIndex = 0;
           state.playback.sequencer.onTextEvent = (messageData, messageType) => {
             if (messageType === 5) {
-              const text = new TextDecoder("shift-JIS").decode(
-                messageData.buffer,
-              );
+              const text = new TextDecoder(
+                state.playback.lyricsEncoding,
+              ).decode(messageData.buffer);
               const cleanText = text.replace(/[\r\n\/\\]/g, "");
               // Only dispatch if it has content AND is not metadata
               if (cleanText && !cleanText.startsWith("@")) {
